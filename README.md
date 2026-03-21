@@ -4,7 +4,7 @@ UW Track is a backend notification system designed to monitor course seat availa
 
 Built with Spring Boot, the system relies on scheduled Java tasks to periodically fetch course data from `public.enroll.wisc.edu`. It tracks status changes of specific course sections and alerts users via email. MySQL is used to persist application states and log historical course data.
 
-* **Frontend Platform:** [p9-nu.vercel.app](https://p9-nu.vercel.app)
+* **Frontend Platform:** [mad-enroll.vercel.app](https://mad-enroll.vercel.app)
 * **Frontend Repository:** [Jingmozhiyu/mad-enroll](https://github.com/Jingmozhiyu/mad-enroll)
 
 ---
