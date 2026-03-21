@@ -1,108 +1,99 @@
-# UW-Madison Course Monitor
+# UW Track
 
-A containerized, high-frequency course enrollment monitoring system for the University of Wisconsin-Madison public course search API. The platform tracks course availability in real-time, sends immediate email notifications on status changes (e.g., WAITLISTED → OPEN), and provides user-isolated task management with JWT-based authentication.
+UW Track is a backend notification system designed to monitor course seat availability at the University of Wisconsin-Madison (UW-Madison).
 
-## Key Features
+Built with Spring Boot, the system relies on scheduled Java tasks to periodically fetch course data from `public.enroll.wisc.edu`. It tracks status changes of specific course sections and alerts users via email. MySQL is used to persist application states and log historical course data.
 
-* **Real-time Monitoring**: Polling-based monitoring of specific course sections.
-* **Anti-WAF Strategy**: Implemented randomized jitter (variable delay) and user-agent rotation to mimic human behavior and avoid IP bans from university firewalls.
-* **Request Aggregation**: Batches queries for multiple sections of the same course into single API requests, reducing network overhead.
-* **Instant Notifications**: SMTP email alerts when monitored section states change, delivered to the owning user's account email.
-* **JWT Authentication**: Supports user registration/login and stateless token-based API authorization.
-* **User Data Isolation**: Every task is scoped by `user_id`, including monitoring, CRUD operations, and scheduler processing.
-* **Audit Logging**: Writes both application logs and section status history (`logs/application.log`, `logs/history.csv`).
-* **Dockerized Deployment**: Fully containerized application and database for consistent deployment across environments.
+* **Frontend Platform:** [p9-nu.vercel.app](https://p9-nu.vercel.app)
+* **Frontend Repository:** [Jingmozhiyu/mad-enroll](https://github.com/Jingmozhiyu/mad-enroll)
 
-## Tech Stack
+---
 
-* **Language**: Java 21
-* **Framework**: Spring Boot 4.0, Spring Security
-* **Database**: MySQL 8.0
-* **Containerization**: Docker & Docker Compose
-* **Network/Parsing**: Jsoup, Jackson
-* **Auth**: JWT (JJWT), BCrypt password hashing
-* **Build Tool**: Maven
+## Deployment
 
-## Architecture Highlights
+### Deploy on VM
 
-### 1. Polling Logic & Optimization
-Instead of naive fixed-interval polling, the system uses a dynamic scheduling algorithm.
-* **Jitter**: Introduces random deviations to the polling interval to evade pattern-based firewall detection.
-* **Aggregation**: If monitoring many sections under one course, the scheduler fetches course-level data once and updates matching sections locally.
+Deploying via **Docker** is highly recommended.
 
-### 2. Authentication & Authorization
-* **Auth APIs**: `/auth/register` and `/auth/login`.
-* **Token Flow**: Login validates BCrypt password hashes and returns JWT for the frontend.
-* **Protected APIs**: `/api/tasks/**` requires Bearer token; unauthenticated access returns `401`.
-* **Frontend Integration**: The web client stores JWT and attaches it to `Authorization` headers for all task requests.
+**1. Create a `.env` file** in the project root with the following variables:
+```env
+MAIL_ADDRESS=your_email@example.com
+MAIL_AUTH_CODE=your_mail_auth_code
+JWT_SECRET=your_jwt_secret
+DB_PASSWORD=your_database_password
+# (Optional)
+DB_USERNAME=root
+```
 
-### 3. Data Model & Persistence
-* **Users Table**: Stores `id`, `email`, and `password_hash`.
-* **Tasks Table**: Stores monitoring tasks with `user_id` ownership and composite uniqueness on `(user_id, section_id)`.
-* **Migration Bootstrap**: Existing legacy task records are assigned to the configured admin user at startup.
-* **State Durability**: Task state remains persistent across restarts via MySQL.
+**2. Create the `docker-compose.yml`** on your remote server:
+```yaml
+services:
+  # 1. Database
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: course_monitor_db
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "3306:3306"
+    command: --default-authentication-plugin=mysql_native_password
 
-## API Overview
+  # 2. Spring Boot
+  app:
+    image: eclipse-temurin:21-jre-jammy
+    restart: always
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JWT_SECRET=${JWT_SECRET}
+      - DB_USERNAME=root
+      - DB_PASSWORD=${DB_PASSWORD}
+      - MAIL_ADDRESS=${MAIL_ADDRESS}
+      - MAIL_AUTH_CODE=${MAIL_AUTH_CODE}
+    volumes:
+      - ./app.jar:/app.jar
+    command: ["java", "-Xmx512m", "-jar", "/app.jar"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
 
-### Public Endpoints
-* `POST /auth/register`
-* `POST /auth/login`
+  # 3. Caddy
+  caddy:
+    image: caddy:2
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
 
-### Protected Endpoints (JWT Required)
-* `GET /api/tasks`
-* `POST /api/tasks?courseName=...`
-* `PATCH /api/tasks/{id}/toggle`
-* `DELETE /api/tasks?courseDisplayName=...`
+volumes:
+  caddy_data:
+  caddy_config:
+```
 
-## Getting Started
+**3. Start the services:**
+```bash
+docker compose up -d
+```
 
-### Prerequisites
-* Docker Desktop (Recommended)
-* **OR** Java 21 SDK + MySQL Server 8.0
+### Local Dev
 
-### Configuration
+For local development, the application defaults to using `application-dev.properties`.
 
-1.  Clone the repository.
-2.  Copy the example configuration file:
-    ```bash
-    cp src/main/resources/application.properties.example src/main/resources/application.properties
-    ```
-3.  Edit `src/main/resources/application.properties` with your details:
-    * **SMTP Settings**: Your Gmail credentials and sender address (`spring.mail.*`, `app.mail.from`).
-    * **JWT Secret**: `app.jwt.secret` must be a strong key (at least 32 characters).
-    * **Admin Bootstrap User**: `app.auth.admin.email` / `app.auth.admin.password`.
-    * **Target Courses / Term**: `uw-api.term-id`, `uw-api.subject-id`.
+Create a `.env` file in your local environment with the identical structure as above (you can hardcode `DB_USERNAME` if preferred).
 
-### Deployment (Docker) - **Recommended**
+Run the Spring Boot Monitor Application.
 
-The project includes a `docker-compose.yml` that orchestrates both the Spring Boot application and the MySQL database.
+Access the local client at `http://localhost:8080`.
 
-1.  **Build and Run**:
-    ```bash
-    docker-compose up -d --build
-    ```
-    *This command builds the JAR file, creates the Docker image, and starts both the App and MySQL containers in the background.*
+## Developers
+Developed by Yinwen Gong.
 
-2.  **Check Logs**:
-    ```bash
-    docker-compose logs -f
-    ```
-
-3.  **Stop Services**:
-    ```bash
-    docker-compose down
-    ```
-
-### Local Development (Manual)
-
-1.  Ensure a local MySQL instance is running on port 3306.
-2.  Update `application.properties` to point to `localhost:3306`.
-3.  Run the application:
-    ```bash
-    ./mvnw spring-boot:run
-    ```
-4.  Open `http://localhost:8080`, register/login, then create your monitoring tasks.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Disclaimer
+This project is an independent tool and is not affiliated with University of Wisconsin-Madison.
