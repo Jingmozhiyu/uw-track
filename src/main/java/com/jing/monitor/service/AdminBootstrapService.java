@@ -29,8 +29,6 @@ import java.util.List;
 @Slf4j
 public class AdminBootstrapService {
 
-    private static final String LEGACY_DEFAULT_EMAIL = "default@uw-course-monitor.local";
-
     @Value("${app.auth.admin.email:admin@uw-course-monitor.local}")
     private String adminEmail;
 
@@ -46,7 +44,7 @@ public class AdminBootstrapService {
      * Runs at startup to prepare auth baseline data and schema expectations.
      */
     @PostConstruct
-    public void initAdminUserAndMigrateTasks() {
+    public void initAdminUser() {
         ensureTaskOwnershipUniqueConstraint();
 
         User admin = userRepository.findByEmail(adminEmail)
@@ -61,15 +59,6 @@ public class AdminBootstrapService {
         if (nullUpdated > 0) {
             log.info("[Auth] Assigned {} existing tasks to admin user {}", nullUpdated, adminEmail);
         }
-
-        userRepository.findByEmail(LEGACY_DEFAULT_EMAIL).ifPresent(legacy -> {
-            if (!legacy.getId().equals(admin.getId())) {
-                int moved = taskRepository.reassignTasksToUser(legacy.getId(), admin.getId());
-                if (moved > 0) {
-                    log.info("[Auth] Migrated {} tasks from legacy default user to admin", moved);
-                }
-            }
-        });
     }
 
     /**
