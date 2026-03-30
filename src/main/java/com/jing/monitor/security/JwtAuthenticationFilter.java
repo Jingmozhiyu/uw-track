@@ -17,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.UUID;
 
 /**
  * Request filter that validates JWT Bearer tokens and populates the security context.
@@ -52,7 +53,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             Claims claims = jwtService.parseToken(token);
-            Long userId = Long.parseLong(claims.getSubject());
+            UUID userId = UUID.fromString(claims.getSubject());
             User user = userRepository.findById(userId).orElse(null);
             if (user != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 AuthenticatedUser principal = new AuthenticatedUser(user.getId(), user.getEmail());

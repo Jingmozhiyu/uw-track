@@ -6,6 +6,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import java.util.UUID;
+
 /**
  * Helper service that exposes authenticated user identity from Spring Security context.
  */
@@ -18,7 +20,7 @@ public class AuthContextService {
      * @return authenticated user id
      * @throws RuntimeException if no valid authenticated principal is available
      */
-    public Long currentUserId() {
+    public UUID currentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated() || authentication instanceof AnonymousAuthenticationToken) {
             throw new RuntimeException("Unauthorized");

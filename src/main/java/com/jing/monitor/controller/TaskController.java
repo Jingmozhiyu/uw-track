@@ -1,13 +1,13 @@
 package com.jing.monitor.controller;
 
 import com.jing.monitor.common.Result;
-
 import com.jing.monitor.model.dto.TaskRespDto;
 import com.jing.monitor.service.TaskService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * REST controller for authenticated task operations.
@@ -31,25 +31,36 @@ public class TaskController {
     }
 
     /**
-     * Toggles task enabled state by id.
+     * Searches a course and returns synced section rows without creating subscriptions.
+     *
+     * @param courseName course keyword from client
+     * @return synced sections for the frontend
+     */
+    @GetMapping("/search")
+    public Result<List<TaskRespDto>> search(@RequestParam String courseName) {
+        return Result.success(taskService.searchCourse(courseName));
+    }
+
+    /**
+     * Adds one section subscription by validated 5-digit section id.
+     *
+     * @param sectionId business section id chosen by the frontend
+     * @return created or existing subscription
+     */
+    @PostMapping
+    public Result<TaskRespDto> add(@RequestParam String sectionId) {
+        return Result.success(taskService.addSection(sectionId));
+    }
+
+    /**
+     * Toggles task enabled state by subscription UUID.
      *
      * @param id task id
      * @return updated task
      */
     @PatchMapping("/{id}/toggle")
-    public Result<TaskRespDto> toggleStatus(@PathVariable Long id) {
+    public Result<TaskRespDto> toggleStatus(@PathVariable UUID id) {
         return Result.success(taskService.toggleTaskStatus(id));
-    }
-
-    /**
-     * Searches a course and adds discovered sections as tasks.
-     *
-     * @param courseName course keyword from client
-     * @return created or updated tasks
-     */
-    @PostMapping
-    public Result<List<TaskRespDto>> searchAndAdd(@RequestParam String courseName){
-        return Result.success(taskService.SearchAndAdd(courseName));
     }
 
     /**

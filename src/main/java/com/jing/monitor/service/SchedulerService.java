@@ -1,30 +1,29 @@
 package com.jing.monitor.service;
 
 import com.jing.monitor.core.CourseCrawler;
+import com.jing.monitor.model.Course;
+import com.jing.monitor.model.CourseSection;
 import com.jing.monitor.model.SectionInfo;
 import com.jing.monitor.model.StatusMapping;
-import com.jing.monitor.model.Task;
-import com.jing.monitor.model.User;
+import com.jing.monitor.model.UserSectionSubscription;
+import com.jing.monitor.repository.CourseRepository;
+import com.jing.monitor.repository.CourseSectionRepository;
 import com.jing.monitor.repository.FileRepository;
-import com.jing.monitor.repository.TaskRepository;
-import com.jing.monitor.repository.UserRepository;
-import lombok.extern.slf4j.Slf4j;
+import com.jing.monitor.repository.UserSectionSubscriptionRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Service responsible for scheduling course monitoring tasks.
- * Refactored V1.0: Implements Course-Level batch fetching to reduce API request frequency.
+ * Service responsible for polling synced courses and dispatching notifications
+ * for subscribed sections.
  */
 @Service
 @RequiredArgsConstructor
@@ -34,172 +33,175 @@ public class SchedulerService {
     private final CourseCrawler crawler;
     private final MailService mailService;
     private final FileRepository fileRepository;
-    private final TaskRepository taskRepository;
-    private final UserRepository userRepository;
+    private final CourseRepository courseRepository;
+    private final CourseSectionRepository courseSectionRepository;
+    private final UserSectionSubscriptionRepository subscriptionRepository;
     private final Random random = new Random();
 
-    /**
-     * Supported alert operations derived from status transitions.
-     */
     enum AlertAction { NONE, SEND_OPEN_EMAIL, SEND_WAITLIST_EMAIL }
 
     /**
-     * Main Monitoring Loop.
-     * Frequency should be set conservatively (e.g., 3-5 minutes) to avoid WAF blocking.
+     * Polls all distinct courses that still have enabled subscriptions.
+     * The loop fetches each course only once per cycle, then fans out alerts
+     * to all subscribed users for the affected section ids.
      */
     @Scheduled(fixedDelayString = "${monitor.poll-interval-ms}")
     public void monitorTask() {
-        // 1) Build monitoring work units by grouping enabled tasks per (user, course).
-        List<Task> tasks = taskRepository.findByEnabledTrueAndUserIdIsNotNull();
-        Map<Long, Set<String>> userCourseMap = new HashMap<>();
-        for (Task task : tasks) {
-            if (task.getUserId() == null || task.getCourseId() == null) {
-                continue;
-            }
-            userCourseMap.computeIfAbsent(task.getUserId(), k -> new HashSet<>()).add(task.getCourseId());
-        }
+        // activeSubs: all enabled user->section subscriptions currently participating in polling.
+        List<UserSectionSubscription> activeSubs = subscriptionRepository.findAllByEnabledTrue();
 
-        if (userCourseMap.isEmpty()) {
+        // subsByCourseId: course business id -> enabled subs whose section belongs to that course.
+        Map<String, List<UserSectionSubscription>> subsByCourseId = activeSubs.stream()
+                .filter(sub -> sub.getSection() != null && sub.getSection().getCourse() != null)
+                .collect(Collectors.groupingBy(sub -> sub.getSection().getCourse().getCourseId(), HashMap::new, Collectors.toList()));
+
+        if (subsByCourseId.isEmpty()) {
             log.info("[Scheduler] No active tasks. Idle.");
             return;
         }
 
-        int totalCourses = userCourseMap.values().stream().mapToInt(Set::size).sum();
-        Map<Long, String> userEmailMap = userRepository.findAllById(userCourseMap.keySet()).stream()
-                .collect(Collectors.toMap(User::getId, User::getEmail));
-
-        log.info("[Scheduler] Starting cycle. Monitoring {} user-course groups.", totalCourses);
+        int totalCourses = subsByCourseId.size();
+        log.info("[Scheduler] Starting cycle. Monitoring {} distinct courses.", totalCourses);
 
         int processed = 0;
-        // 2) Process each course once per user to reduce external API calls.
-        for (Map.Entry<Long, Set<String>> entry : userCourseMap.entrySet()) {
-            Long userId = entry.getKey();
-            String recipientEmail = userEmailMap.get(userId);
-            if (recipientEmail == null || recipientEmail.isBlank()) {
-                log.warn("[Scheduler] Skipping user {} because email is missing.", userId);
-                continue;
-            }
-            for (String courseId : entry.getValue()) {
-                processSingleCourse(userId, recipientEmail, courseId);
-                processed++;
-                try {
-                    if (processed < totalCourses) {
-                        long sleepTime = 120000 + random.nextInt(10000);
-                        Thread.sleep(sleepTime);
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+        for (Map.Entry<String, List<UserSectionSubscription>> entry : subsByCourseId.entrySet()) {
+            processSingleCourse(entry.getKey(), entry.getValue());
+            processed++;
+            try {
+                if (processed < totalCourses) {
+                    long sleepTime = 5000 + random.nextInt(500);
+                    Thread.sleep(sleepTime);
                 }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
         }
     }
 
     /**
-     * Fetches all sections for a given course and updates local Task states.
-     * @param userId The owner user id.
-     * @param recipientEmail The owner user email.
-     * @param courseId The 6-digit course identifier (e.g., "004289")
+     * Fetches one course snapshot, syncs the latest section state, and dispatches
+     * notifications only for sections whose status transitioned in this poll.
+     *
+     * @param courseId UW 6-digit course id
+     * @param subs enabled subscriptions that belong to this course
      */
-    private void processSingleCourse(Long userId, String recipientEmail, String courseId) {
+    private void processSingleCourse(String courseId, List<UserSectionSubscription> subs) {
         try {
-            // Step 1: Fetch all sections for this course in one external request.
             List<SectionInfo> infos = crawler.fetchCourseStatus(courseId);
-
-            if (infos == null) {
-                log.warn("[Scheduler] Fetch failed or blocked for user {} course {}", userId, courseId);
+            if (infos == null || infos.isEmpty()) {
+                log.warn("[Scheduler] Fetch failed or returned empty data for course {}", courseId);
                 return;
             }
 
-            // Step 2: Build fast lookup table for user-owned tasks in this course.
-            List<Task> existingTasksForCourse = taskRepository.findAllByCourseIdAndUserId(courseId, userId);
-            Map<String, Task> taskMapBySectionId = existingTasksForCourse.stream()
-                    .collect(Collectors.toMap(Task::getSectionId, Function.identity(), (left, right) -> left, HashMap::new));
+            // Keep the shared course row current before touching section snapshots.
+            Course course = upsertCourse(infos.get(0));
 
-            // Step 3: Synchronize section snapshots into owned tasks.
+            // existingSectionsBySectionId: section business id -> previously persisted section snapshot.
+            Map<String, CourseSection> existingSectionsBySectionId =
+                    courseSectionRepository.findAllByCourse_CourseId(courseId).stream()
+                            .collect(Collectors.toMap(CourseSection::getSectionId, section -> section, (left, right) -> left, HashMap::new));
+
+            // subsBySectionId: section business id -> enabled subs targeting that section.
+            Map<String, List<UserSectionSubscription>> subsBySectionId =
+                    subs.stream().collect(Collectors.groupingBy(sub -> sub.getSection().getSectionId(), HashMap::new, Collectors.toList()));
+
+            // Apply each fresh crawler snapshot and fan out alerts only on state transitions.
             for (SectionInfo info : infos) {
+                String sectionId = info.getSectionId();
                 StatusMapping currentStatus = info.getStatus();
-                StatusMapping previousStatus = null;
-                String sectionId = info.getSection();
+                CourseSection section = existingSectionsBySectionId.get(sectionId);
+                StatusMapping previousStatus = section == null ? null : section.getLastStatus();
 
-                // O(1) lookup avoids query-per-section overhead.
-                Task task = taskMapBySectionId.get(sectionId);
+                if (section == null) {
+                    section = new CourseSection();
+                    section.setSectionId(sectionId);
+                    log.info("[Scheduler] New section found {}. Adding to DB.", sectionId);
+                }
 
-                // Auto-discovery creates missing sections; existing rows update transition states.
-                if (task == null) {
-                    // New section discovered under the same user+course ownership.
-                    task = new Task(info.getSubject(), info.getCatalogNumber(), sectionId, courseId, info.getStatus());
-                    task.setUserId(userId);
-                    taskMapBySectionId.put(sectionId, task);
-                    log.info("[Scheduler] New section found {}. Adding to DB.", info.getSection());
+                section.setCourse(course);
+                section.setLastStatus(currentStatus);
+                section.setOpenSeats(info.getOpenSeats());
+                section.setCapacity(info.getCapacity());
+                section.setWaitlistSeats(info.getWaitlistSeats());
+                section.setWaitlistCapacity(info.getWaitlistCapacity());
+                section.setMeetingInfo(info.getMeetingInfo());
+                CourseSection savedSection = courseSectionRepository.save(section);
+                existingSectionsBySectionId.put(savedSection.getSectionId(), savedSection);
 
-                    AlertAction action = determineAction(null, currentStatus);
-                    dispatchMail(action, recipientEmail, info);
-                } else {
-                    // Existing task transition handling.
-                    previousStatus = task.getLastStatus();
+                if (previousStatus != currentStatus) {
+                    if (previousStatus != null) {
+                        log.info("[Scheduler] State changed: {} -> {} for {}", previousStatus, currentStatus, sectionId);
+                    }
+                    fileRepository.save(info);
 
-                    if (task.isEnabled()) {
-                        AlertAction action = determineAction(previousStatus, currentStatus);
+                    AlertAction action = determineAction(previousStatus, currentStatus);
+                    for (UserSectionSubscription sub : subsBySectionId.getOrDefault(sectionId, List.of())) {
+                        String recipientEmail = sub.getUser().getEmail();
+                        if (recipientEmail == null || recipientEmail.isBlank()) {
+                            log.warn("[Scheduler] Skipping sub {} because email is missing.", sub.getId());
+                            continue;
+                        }
                         dispatchMail(action, recipientEmail, info);
                     }
                 }
-
-                // Persist only when status changed or task is newly inserted.
-                if (previousStatus != currentStatus || task.getId() == null) {
-                    if (task.getId() != null) {
-                        log.info("[Scheduler] State changed: {} -> {} for {}", previousStatus, currentStatus, sectionId);
-                    }
-                    task.setLastStatus(currentStatus);
-                    taskRepository.save(task);
-                    fileRepository.save(info);
-                }
             }
         } catch (Exception e) {
-            log.error("[Scheduler] Error processing user {} course {}", userId, courseId, e);
+            log.error("[Scheduler] Error processing course {}", courseId, e);
         }
     }
 
     /**
-     * Calculates whether a status transition should trigger an email alert.
+     * Calculates which alert action, if any, should be triggered by the transition.
      *
-     * @param prev previous status from DB, or null for new sections
-     * @param curr current status from crawler
-     * @return alert action to execute
+     * @param prev previous persisted section status
+     * @param curr latest crawler status
+     * @return alert action to dispatch
      */
     private AlertAction determineAction(StatusMapping prev, StatusMapping curr) {
-        if (prev == null) {
-            // Logic for newly discovered tasks (prevent spam on restart)
-            // return AlertAction.NONE; // Uncomment to silent new task alerts
-            if (curr == StatusMapping.OPEN) return AlertAction.SEND_OPEN_EMAIL;
+        if (prev == null || prev == curr) {
             return AlertAction.NONE;
         }
 
-        if (prev == curr) return AlertAction.NONE;
-
         switch (curr) {
-            case OPEN: return AlertAction.SEND_OPEN_EMAIL;
+            case OPEN:
+                return AlertAction.SEND_OPEN_EMAIL;
             case WAITLISTED:
-                // Only alert if upgraded from CLOSED. Downgrade from OPEN is ignored.
                 return (prev == StatusMapping.CLOSED) ? AlertAction.SEND_WAITLIST_EMAIL : AlertAction.NONE;
-            default: return AlertAction.NONE;
+            default:
+                return AlertAction.NONE;
         }
     }
 
     /**
-     * Executes email side-effects for the selected alert action.
+     * Sends the selected email side effect for one subscribed user.
      *
-     * @param action transition action
-     * @param recipientEmail recipient email
-     * @param info section data used to format email content
+     * @param action chosen alert action
+     * @param recipientEmail notification recipient
+     * @param info latest section snapshot
      */
     private void dispatchMail(AlertAction action, String recipientEmail, SectionInfo info) {
-        // Future RabbitMQ split: scheduler publishes alert events, dedicated consumer handles email delivery/retry.
         if (action == AlertAction.SEND_OPEN_EMAIL) {
-            log.info("[Scheduler] ALERT OPEN detected for {}", info.getSection());
-            mailService.sendCourseOpenAlert(recipientEmail, info.getSection(), info.getSubject() + " " + info.getCatalogNumber());
+            log.info("[Scheduler] ALERT OPEN detected for {}", info.getSectionId());
+            mailService.sendCourseOpenAlert(recipientEmail, info.getSectionId(), info.getCourseDisplayName());
         } else if (action == AlertAction.SEND_WAITLIST_EMAIL) {
-            log.info("[Scheduler] ALERT WAITLIST detected for {}", info.getSection());
-            mailService.sendCourseWaitlistedAlert(recipientEmail, info.getSection(), info.getSubject() + " " + info.getCatalogNumber());
+            log.info("[Scheduler] ALERT WAITLIST detected for {}", info.getSectionId());
+            mailService.sendCourseWaitlistedAlert(recipientEmail, info.getSectionId(), info.getCourseDisplayName());
         }
+    }
+
+    /**
+     * Persists the canonical course row shared by the incoming section snapshots.
+     *
+     * @param info representative section snapshot carrying course metadata
+     * @return persisted canonical course row
+     */
+    private Course upsertCourse(SectionInfo info) {
+        Course course = courseRepository.findByCourseId(info.getCourseId())
+                .orElseGet(() -> new Course(info.getCourseId()));
+        course.setTermCode(info.getTermCode());
+        course.setSubjectCode(info.getSubjectCode());
+        course.setSubjectShortName(info.getSubjectShortName());
+        course.setCatalogNumber(info.getCatalogNumber());
+        return courseRepository.save(course);
     }
 }

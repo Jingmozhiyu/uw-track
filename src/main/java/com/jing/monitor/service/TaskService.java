@@ -2,27 +2,31 @@ package com.jing.monitor.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.jing.monitor.core.CourseCrawler;
-import com.jing.monitor.model.Task;
-import com.jing.monitor.model.dto.TaskReqDto;
+import com.jing.monitor.model.Course;
+import com.jing.monitor.model.CourseSection;
+import com.jing.monitor.model.SectionInfo;
+import com.jing.monitor.model.User;
+import com.jing.monitor.model.UserSectionSubscription;
 import com.jing.monitor.model.dto.TaskRespDto;
-import com.jing.monitor.repository.TaskRepository;
-import jakarta.transaction.Transactional;
-import lombok.extern.slf4j.Slf4j;
+import com.jing.monitor.repository.CourseRepository;
+import com.jing.monitor.repository.CourseSectionRepository;
+import com.jing.monitor.repository.UserRepository;
+import com.jing.monitor.repository.UserSectionSubscriptionRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.BeanUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.Iterator;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Application service for authenticated task CRUD and course-to-task expansion.
+ * Application service for authenticated section search and subscription management.
  */
 @Service
 @RequiredArgsConstructor
@@ -30,48 +34,36 @@ import java.util.stream.Collectors;
 public class TaskService {
 
     private final CourseCrawler crawler;
-    private final TaskRepository taskRepository;
+    private final CourseRepository courseRepository;
+    private final CourseSectionRepository courseSectionRepository;
+    private final UserSectionSubscriptionRepository subscriptionRepository;
+    private final UserRepository userRepository;
     private final AuthContextService authContextService;
 
     /**
-     * Returns all tasks owned by the current authenticated user.
+     * Returns all section subscriptions owned by the current authenticated user.
      *
-     * @return list of task response DTOs
+     * @return list of section subscription DTOs
      */
+    @Transactional(readOnly = true)
     public List<TaskRespDto> getAllTasks() {
-        Long userId = authContextService.currentUserId();
-        return taskRepository.findAllByUserId(userId).stream()
-                .map(this::convertToResp)
+        UUID userId = authContextService.currentUserId();
+        return subscriptionRepository.findAllByUser_Id(userId).stream()
+                .sorted(Comparator.comparing(sub -> sub.getSection().getSectionId()))
+                .map(this::toSubscribedResp)
                 .collect(Collectors.toList());
     }
 
     /**
-     * Toggles one task's enabled flag under current user ownership.
-     *
-     * @param id task id
-     * @return updated task response
-     */
-    public TaskRespDto toggleTaskStatus(Long id) {
-        Long userId = authContextService.currentUserId();
-        Task task = taskRepository.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new RuntimeException("Task not found: " + id));
-
-        // Flip the boolean
-        task.setEnabled(!task.isEnabled());
-
-        Task saved = taskRepository.save(task);
-        return convertToResp(saved);
-    }
-
-    /**
-     * Searches a course and expands all discovered section ids into user tasks.
+     * Searches a course, syncs canonical course/section rows into the database,
+     * and returns section rows directly to the frontend without creating subscriptions.
      *
      * @param courseName user-provided course query
-     * @return created or updated task DTOs
+     * @return synced section DTOs, enriched with the current user's existing sub state when present
      */
-    public List<TaskRespDto> SearchAndAdd(String courseName) {
+    @Transactional
+    public List<TaskRespDto> searchCourse(String courseName) {
         JsonNode root = crawler.searchCourse(courseName);
-
         if (root == null || root.path("found").asInt() == 0) {
             throw new RuntimeException("Course not found: " + courseName);
         }
@@ -82,96 +74,187 @@ public class TaskService {
             throw new RuntimeException("Wrong input / Course not found: " + courseName);
         }
 
-        JsonNode reqs = firstHit.path("courseRequirements");
-        Iterator<String> fieldNames = reqs.fieldNames();
-        List<TaskReqDto> reqDtoList = new ArrayList<>();
-        Set<String> sectionIdSet = new LinkedHashSet<>();
-
-        // Traverse all dynamic requirement keys and aggregate section IDs.
-        while (fieldNames.hasNext()) {
-            String dynamicKey = fieldNames.next(); // e.g. "018015=", "018015=100010"
-            JsonNode sectionIdArray = reqs.path(dynamicKey);
-            if (!sectionIdArray.isArray()) {
-                continue;
-            }
-            for (int i = 0; i < sectionIdArray.size(); i++) {
-                sectionIdSet.add(sectionIdArray.get(i).asText());
-            }
+        String courseId = firstHit.path("courseId").asText();
+        List<SectionInfo> infos = crawler.fetchCourseStatus(courseId);
+        if (infos == null || infos.isEmpty()) {
+            throw new RuntimeException("Course details unavailable: " + courseName);
         }
 
-        for (String sectionId : sectionIdSet) {
-            TaskReqDto reqDto = new TaskReqDto();
-            log.info("[TaskService] Found section ID: {}", sectionId);
-            reqDto.setCourseDisplayName(foundName);
-            reqDto.setSectionId(sectionId);
-            reqDto.setCourseId(firstHit.path("courseId").asText());
-            reqDto.setEnabled(false);
-            reqDtoList.add(reqDto);
-        }
+        Map<String, CourseSection> sectionsBySectionId = syncSections(infos);
+        UUID userId = authContextService.currentUserId();
+        Map<String, UserSectionSubscription> subsBySectionId =
+                subscriptionRepository.findAllBySection_SectionIdInAndUser_Id(sectionsBySectionId.keySet(), userId).stream()
+                        .collect(Collectors.toMap(sub -> sub.getSection().getSectionId(), sub -> sub));
 
-        return addCourse(reqDtoList);
+        return sectionsBySectionId.values().stream()
+                .sorted(Comparator.comparing(CourseSection::getSectionId))
+                .map(section -> toSearchResp(section, subsBySectionId.get(section.getSectionId())))
+                .collect(Collectors.toList());
     }
 
     /**
-     * Upserts tasks for the current user from prepared request DTOs.
+     * Creates or returns one subscription for the provided 5-digit section id.
      *
-     * @param reqDtos task request DTO list
-     * @return persisted task DTOs
+     * @param sectionId validated 5-digit section identifier from the frontend
+     * @return the persisted section subscription DTO
      */
-    public List<TaskRespDto> addCourse(List<TaskReqDto> reqDtos){
-        Long userId = authContextService.currentUserId();
-        List<TaskRespDto> respDtos = new ArrayList<>();
-        if (reqDtos == null || reqDtos.isEmpty()) {
-            return respDtos;
+    @Transactional
+    public TaskRespDto addSection(String sectionId) {
+        UUID userId = authContextService.currentUserId();
+        CourseSection section = courseSectionRepository.findBySectionId(sectionId)
+                .orElseThrow(() -> new RuntimeException("Section not found. Search before adding: " + sectionId));
+
+        UserSectionSubscription existingSub = subscriptionRepository.findByUser_IdAndSection_SectionId(userId, sectionId)
+                .orElse(null);
+        if (existingSub != null) {
+            return toSubscribedResp(existingSub);
         }
 
-        List<String> sectionIds = reqDtos.stream()
-                .map(TaskReqDto::getSectionId)
-                .toList();
-        Map<String, Task> existingTaskMap = taskRepository.findAllBySectionIdInAndUserId(sectionIds, userId).stream()
-                .collect(Collectors.toMap(Task::getSectionId, Function.identity()));
-
-        for (TaskReqDto req : reqDtos){
-            Task task = existingTaskMap.get(req.getSectionId());
-            if (task == null) {
-                task = new Task();
-                BeanUtils.copyProperties(req, task);
-                task.setUserId(userId);
-            } else {
-                // Idempotent upsert for user-owned section tasks.
-                task.setCourseDisplayName(req.getCourseDisplayName());
-                task.setCourseId(req.getCourseId());
-                if (task.getUserId() == null) {
-                    task.setUserId(userId);
-                }
-            }
-            taskRepository.save(task);
-            respDtos.add(convertToResp(task));
-        }
-        return respDtos;
+        User user = userRepository.getReferenceById(userId);
+        UserSectionSubscription sub = new UserSectionSubscription();
+        sub.setUser(user);
+        sub.setSection(section);
+        sub.setEnabled(false);
+        UserSectionSubscription savedSub = subscriptionRepository.save(sub);
+        return toSubscribedResp(savedSub);
     }
 
     /**
-     * Deletes all tasks matching course display name for current user.
+     * Toggles one subscription's enabled flag under current user ownership.
      *
-     * @param courseDisplayName course display name
+     * @param id subscription UUID
+     * @return updated subscription DTO
+     */
+    @Transactional
+    public TaskRespDto toggleTaskStatus(UUID id) {
+        UUID userId = authContextService.currentUserId();
+        UserSectionSubscription sub = subscriptionRepository.findByIdAndUser_Id(id, userId)
+                .orElseThrow(() -> new RuntimeException("Subscription not found: " + id));
+
+        sub.setEnabled(!sub.isEnabled());
+        UserSectionSubscription savedSub = subscriptionRepository.save(sub);
+        return toSubscribedResp(savedSub);
+    }
+
+    /**
+     * Deletes all subscriptions matching a course display name for the current user.
+     *
+     * @param courseDisplayName display name rendered by the frontend, for example "COMP SCI 577"
      */
     @Transactional
     public void deleteTask(String courseDisplayName) {
-        Long userId = authContextService.currentUserId();
-        taskRepository.deleteAllByCourseDisplayNameAndUserId(courseDisplayName, userId);
+        UUID userId = authContextService.currentUserId();
+        List<UserSectionSubscription> subs = subscriptionRepository.findAllByUser_Id(userId);
+        List<UserSectionSubscription> matchingSubs = subs.stream()
+                .filter(sub -> courseDisplayName.equalsIgnoreCase(buildCourseDisplayName(sub.getSection().getCourse())))
+                .toList();
+        if (!matchingSubs.isEmpty()) {
+            subscriptionRepository.deleteAll(matchingSubs);
+        }
     }
 
     /**
-     * Converts task entity to API response DTO.
+     * Syncs canonical course and section rows from crawler snapshots.
      *
-     * @param task entity
-     * @return DTO
+     * @param infos fresh section snapshots returned by the crawler
+     * @return map of persisted sections keyed by business section id
      */
-    private TaskRespDto convertToResp(Task task) {
+    private Map<String, CourseSection> syncSections(List<SectionInfo> infos) {
+        if (infos == null || infos.isEmpty()) {
+            return Map.of();
+        }
+
+        // Persist or refresh the canonical course row shared by all section snapshots.
+        SectionInfo firstInfo = infos.get(0);
+        Course course = courseRepository.findByCourseId(firstInfo.getCourseId())
+                .orElseGet(() -> new Course(firstInfo.getCourseId()));
+        course.setTermCode(firstInfo.getTermCode());
+        course.setSubjectCode(firstInfo.getSubjectCode());
+        course.setSubjectShortName(firstInfo.getSubjectShortName());
+        course.setCatalogNumber(firstInfo.getCatalogNumber());
+        Course savedCourse = courseRepository.save(course);
+
+        // existingSectionsBySectionId: section business id -> existing persisted section row.
+        Map<String, CourseSection> existingSectionsBySectionId =
+                courseSectionRepository.findAllByCourse_CourseId(savedCourse.getCourseId()).stream()
+                        .collect(Collectors.toMap(CourseSection::getSectionId, section -> section));
+
+        // savedSectionsBySectionId: section business id -> freshly saved section row.
+        Map<String, CourseSection> savedSectionsBySectionId = new LinkedHashMap<>();
+
+        // Apply each crawler snapshot onto its matching section row and keep seat/status metadata current.
+        for (SectionInfo info : infos) {
+            CourseSection section = existingSectionsBySectionId.getOrDefault(info.getSectionId(), new CourseSection());
+            section.setSectionId(info.getSectionId());
+            section.setCourse(savedCourse);
+            section.setLastStatus(info.getStatus());
+            section.setOpenSeats(info.getOpenSeats());
+            section.setCapacity(info.getCapacity());
+            section.setWaitlistSeats(info.getWaitlistSeats());
+            section.setWaitlistCapacity(info.getWaitlistCapacity());
+            section.setMeetingInfo(info.getMeetingInfo());
+
+            CourseSection savedSection = courseSectionRepository.save(section);
+            savedSectionsBySectionId.put(savedSection.getSectionId(), savedSection);
+        }
+
+        return savedSectionsBySectionId;
+    }
+
+    /**
+     * Builds a response DTO for an already persisted subscription.
+     *
+     * @param sub persisted section subscription
+     * @return frontend-ready DTO
+     */
+    private TaskRespDto toSubscribedResp(UserSectionSubscription sub) {
+        return toResp(sub.getSection(), sub);
+    }
+
+    /**
+     * Builds a response DTO for a search result section, optionally enriched with
+     * the current user's existing sub state.
+     *
+     * @param section canonical section row
+     * @param sub optional existing subscription for the current user
+     * @return frontend-ready DTO
+     */
+    private TaskRespDto toSearchResp(CourseSection section, UserSectionSubscription sub) {
+        return toResp(section, sub);
+    }
+
+    /**
+     * Converts a canonical section and optional subscription into one frontend DTO.
+     *
+     * @param section canonical section row
+     * @param sub optional subscription row for the current user
+     * @return frontend-ready DTO
+     */
+    private TaskRespDto toResp(CourseSection section, UserSectionSubscription sub) {
+        Course course = section.getCourse();
         TaskRespDto resp = new TaskRespDto();
-        BeanUtils.copyProperties(task, resp);
-        resp.setStatus(task.getLastStatus());
+        resp.setId(sub == null ? null : sub.getId());
+        resp.setSectionId(section.getSectionId());
+        resp.setCourseId(course.getCourseId());
+        resp.setSubjectCode(course.getSubjectCode());
+        resp.setCatalogNumber(course.getCatalogNumber());
+        resp.setCourseDisplayName(buildCourseDisplayName(course));
+        resp.setMeetingInfo(section.getMeetingInfo());
+        resp.setStatus(section.getLastStatus());
+        resp.setEnabled(sub != null && sub.isEnabled());
         return resp;
+    }
+
+    /**
+     * Builds the display name expected by the current frontend.
+     *
+     * @param course canonical course row
+     * @return human-readable course display name
+     */
+    private String buildCourseDisplayName(Course course) {
+        String subject = (course.getSubjectShortName() == null || course.getSubjectShortName().isBlank())
+                ? course.getSubjectCode()
+                : course.getSubjectShortName();
+        return subject + " " + course.getCatalogNumber();
     }
 }

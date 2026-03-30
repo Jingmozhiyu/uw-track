@@ -1,0 +1,33 @@
+package com.jing.monitor.repository;
+
+import com.jing.monitor.model.UserSectionSubscription;
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * Repository for user-owned section subscriptions.
+ */
+@Repository
+public interface UserSectionSubscriptionRepository extends JpaRepository<UserSectionSubscription, UUID> {
+
+    @EntityGraph(attributePaths = {"user", "section", "section.course"})
+    List<UserSectionSubscription> findAllByUser_Id(UUID userId);
+
+    @EntityGraph(attributePaths = {"user", "section", "section.course"})
+    Optional<UserSectionSubscription> findByIdAndUser_Id(UUID id, UUID userId);
+
+    @EntityGraph(attributePaths = {"user", "section", "section.course"})
+    List<UserSectionSubscription> findAllBySection_SectionIdInAndUser_Id(Collection<String> sectionIds, UUID userId);
+
+    @EntityGraph(attributePaths = {"user", "section", "section.course"})
+    List<UserSectionSubscription> findAllByEnabledTrue();
+
+    @EntityGraph(attributePaths = {"user", "section", "section.course"})
+    Optional<UserSectionSubscription> findByUser_IdAndSection_SectionId(UUID userId, String sectionId);
+}

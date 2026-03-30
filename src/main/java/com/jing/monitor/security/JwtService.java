@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 
 /**
  * Utility service for JWT creation and validation.
@@ -34,7 +35,7 @@ public class JwtService {
      * @param email user email
      * @return signed JWT string
      */
-    public String generateToken(Long userId, String email) {
+    public String generateToken(UUID userId, String email) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expirationMs);
         return Jwts.builder()

@@ -3,6 +3,7 @@ package com.jing.monitor.core;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jing.monitor.model.SectionInfo;
 import com.jing.monitor.model.StatusMapping;
@@ -14,9 +15,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Core component responsible for fetching data from the UW-Madison Enrollment API.
@@ -41,9 +40,6 @@ public class CourseCrawler {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    // Persistent cookie store for WAF/session continuity.
-    private Map<String, String> cookies = new HashMap<>();
-
     /**
      * Fetches the real-time status of ALL sections for a specific course ID.
      *
@@ -61,19 +57,20 @@ public class CourseCrawler {
                     .header("User-Agent", userAgent)
                     .header("Referer", "https://public.enroll.wisc.edu/")
                     .header("Accept", "application/json, text/plain, */*")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("Accept-Encoding", "gzip, deflate")
+                    .header("Sec-Fetch-Dest", "empty")
+                    .header("Sec-Fetch-Mode", "cors")
+                    .header("Sec-Fetch-Site", "same-origin")
+                    .header("sec-ch-ua", "\"Not A(Brand\";v=\"99\", \"Google Chrome\";v=\"121\", \"Chromium\";v=\"121\"")
+                    .header("sec-ch-ua-mobile", "?0")
+                    .header("sec-ch-ua-platform", "\"macOS\"")
                     .header("Connection", "keep-alive")
                     .method(Connection.Method.GET)
                     .timeout(15000)
                     .ignoreHttpErrors(true);
 
-            if (!cookies.isEmpty()) {
-                conn.cookies(cookies);
-            }
-
             Connection.Response response = conn.execute();
-
-            // Refresh cookies (Maintain session)
-            cookies.putAll(response.cookies());
 
             int statusCode = response.statusCode();
 
@@ -84,24 +81,20 @@ public class CourseCrawler {
 
                 if (rootNode.isArray()) {
                     for (JsonNode node : rootNode) {
-                        // Extract Data
-                        String subject = node.path("sections").path(0)
-                                .path("subject").path("shortDescription").asText();
-                        String catalogNumber = node.path("catalogNumber").asText();
-                        String sectionId = node.path("enrollmentClassNumber").asText();
-                        String statusStr = node.path("packageEnrollmentStatus").path("status").asText();
-
-                        StatusMapping status;
-                        try {
-                            status = StatusMapping.valueOf(statusStr);
-                        } catch (Exception e) {
-                            // Fallback for unknown status strings
-                            status = StatusMapping.CLOSED;
+                        SectionInfo info = parseSectionInfo(node, courseId);
+                        if (info != null) {
+                            sectionInfos.add(info);
                         }
-
-                        sectionInfos.add(new SectionInfo(subject, catalogNumber, sectionId, status, courseId));
                     }
                     return sectionInfos;
+                }
+
+                if (rootNode.isObject()) {
+                    SectionInfo info = parseSectionInfo(rootNode, courseId);
+                    if (info != null) {
+                        sectionInfos.add(info);
+                        return sectionInfos;
+                    }
                 }
 
                 log.warn("[Crawler] API 200 but returned unexpected format for course: {}", courseId);
@@ -122,6 +115,94 @@ public class CourseCrawler {
         }
 
         return null;
+    }
+
+    private SectionInfo parseSectionInfo(JsonNode node, String fallbackCourseId) {
+        String sectionId = node.path("enrollmentClassNumber").asText();
+        if (sectionId == null || sectionId.isBlank()) {
+            return null;
+        }
+
+        JsonNode representativeSectionNode = node.path("sections").isArray() && !node.path("sections").isEmpty()
+                ? node.path("sections").path(0)
+                : JsonNodeFactory.instance.objectNode();
+        JsonNode subjectNode = representativeSectionNode.path("subject");
+        JsonNode enrollmentStatusNode = node.path("enrollmentStatus");
+        JsonNode packageStatusNode = node.path("packageEnrollmentStatus");
+
+        Integer openSeats = nullableInt(enrollmentStatusNode, "openSeats");
+        Integer capacity = nullableInt(enrollmentStatusNode, "capacity");
+        Integer waitlistSeats = nullableInt(enrollmentStatusNode, "openWaitlistSpots");
+        Integer waitlistCapacity = nullableInt(enrollmentStatusNode, "waitlistCapacity");
+
+        return new SectionInfo(
+                node.path("termCode").asText(termId),
+                node.path("courseId").asText(fallbackCourseId),
+                sectionId,
+                node.path("subjectCode").asText(subjectNode.path("subjectCode").asText(subjectId)),
+                subjectNode.path("shortDescription").asText(),
+                node.path("catalogNumber").asText(representativeSectionNode.path("catalogNumber").asText()),
+                parseStatus(packageStatusNode.path("status").asText(), openSeats, waitlistSeats),
+                openSeats,
+                capacity,
+                waitlistSeats,
+                waitlistCapacity,
+                buildMeetingInfo(node.path("classMeetings"))
+        );
+    }
+
+    private StatusMapping parseStatus(String rawStatus, Integer openSeats, Integer waitlistSeats) {
+        if (rawStatus != null && !rawStatus.isBlank()) {
+            try {
+                return StatusMapping.valueOf(rawStatus);
+            } catch (Exception ignored) {
+                // Fall through to numeric inference.
+            }
+        }
+
+        if (openSeats != null && openSeats > 0) {
+            return StatusMapping.OPEN;
+        }
+        if (waitlistSeats != null && waitlistSeats > 0) {
+            return StatusMapping.WAITLISTED;
+        }
+        return StatusMapping.CLOSED;
+    }
+
+    private Integer nullableInt(JsonNode node, String fieldName) {
+        if (node == null || node.isMissingNode()) {
+            return null;
+        }
+        JsonNode valueNode = node.path(fieldName);
+        if (valueNode.isMissingNode() || valueNode.isNull()) {
+            return null;
+        }
+        return valueNode.asInt();
+    }
+
+    private String buildMeetingInfo(JsonNode classMeetingsNode) {
+        ArrayNode result = mapper.createArrayNode();
+        if (classMeetingsNode != null && classMeetingsNode.isArray()) {
+            for (JsonNode meetingNode : classMeetingsNode) {
+                if (!"CLASS".equalsIgnoreCase(meetingNode.path("meetingType").asText())) {
+                    continue;
+                }
+                ObjectNode payload = mapper.createObjectNode();
+                payload.put("meetingDays", meetingNode.path("meetingDays").asText());
+                if (!meetingNode.path("meetingTimeStart").isMissingNode() && !meetingNode.path("meetingTimeStart").isNull()) {
+                    payload.put("meetingTimeStart", meetingNode.path("meetingTimeStart").asLong());
+                } else {
+                    payload.putNull("meetingTimeStart");
+                }
+                if (!meetingNode.path("meetingTimeEnd").isMissingNode() && !meetingNode.path("meetingTimeEnd").isNull()) {
+                    payload.put("meetingTimeEnd", meetingNode.path("meetingTimeEnd").asLong());
+                } else {
+                    payload.putNull("meetingTimeEnd");
+                }
+                result.add(payload);
+            }
+        }
+        return result.toString();
     }
 
     /**
@@ -165,6 +246,8 @@ public class CourseCrawler {
                     .header("Content-Type", "application/json")
                     .header("User-Agent", userAgent)
                     .header("Referer", "https://public.enroll.wisc.edu/")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("Accept-Encoding", "gzip, deflate")
                     .ignoreContentType(true)
                     .timeout(10000)
                     .method(Connection.Method.POST)
@@ -183,14 +266,5 @@ public class CourseCrawler {
             log.error("[Crawler] Network error during search for query: {}", userQueryString, e);
             return null;
         }
-    }
-
-    /**
-     * Merges externally provided cookies into the crawler cookie store.
-     *
-     * @param newCookies cookies to merge
-     */
-    public void setCookies(Map<String, String> newCookies) {
-        this.cookies.putAll(newCookies);
     }
 }
