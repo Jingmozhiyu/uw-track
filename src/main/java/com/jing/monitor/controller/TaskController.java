@@ -7,7 +7,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.UUID;
 
 /**
  * REST controller for authenticated task operations.
@@ -53,25 +52,14 @@ public class TaskController {
     }
 
     /**
-     * Toggles task enabled state by subscription UUID.
+     * Soft-deletes one task by disabling the current user's subscription for that section.
      *
-     * @param id task id
-     * @return updated task
-     */
-    @PatchMapping("/{id}/toggle")
-    public Result<TaskRespDto> toggleStatus(@PathVariable UUID id) {
-        return Result.success(taskService.toggleTaskStatus(id));
-    }
-
-    /**
-     * Deletes all tasks for a course display name under current user.
-     *
-     * @param courseDisplayName display name to delete
+     * @param sectionId validated 5-digit section id
      * @return empty success result
      */
     @DeleteMapping
-    public Result<Void> delete(@RequestParam String courseDisplayName){
-        taskService.deleteTask(courseDisplayName);
+    public Result<Void> delete(@RequestParam String sectionId){
+        taskService.deleteTask(sectionId);
         return Result.success();
     }
 }

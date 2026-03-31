@@ -5,6 +5,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -31,6 +33,10 @@ public class User {
     @Column(nullable = false, name = "password_hash")
     private String passwordHash;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, columnDefinition = "varchar(16) default 'USER'")
+    private UserRole role = UserRole.USER;
+
     /**
      * Creates a user with a normalized email and encoded password hash.
      *
@@ -40,5 +46,6 @@ public class User {
     public User(String email, String passwordHash) {
         this.email = email;
         this.passwordHash = passwordHash;
+        this.role = UserRole.USER;
     }
 }

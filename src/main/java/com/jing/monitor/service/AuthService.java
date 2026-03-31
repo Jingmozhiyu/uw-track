@@ -1,6 +1,7 @@
 package com.jing.monitor.service;
 
 import com.jing.monitor.model.User;
+import com.jing.monitor.model.UserRole;
 import com.jing.monitor.model.dto.AuthLoginReqDto;
 import com.jing.monitor.model.dto.AuthLoginRespDto;
 import com.jing.monitor.model.dto.AuthRegisterReqDto;
@@ -37,6 +38,7 @@ public class AuthService {
         }
 
         User user = new User(email, passwordEncoder.encode(password));
+        user.setRole(UserRole.USER);
         userRepository.save(user);
     }
 

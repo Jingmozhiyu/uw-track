@@ -120,37 +120,17 @@ public class TaskService {
     }
 
     /**
-     * Toggles one subscription's enabled flag under current user ownership.
+     * Soft-deletes one subscription by disabling it through the business section id.
      *
-     * @param id subscription UUID
-     * @return updated subscription DTO
+     * @param sectionId validated 5-digit section identifier from the frontend
      */
     @Transactional
-    public TaskRespDto toggleTaskStatus(UUID id) {
+    public void deleteTask(String sectionId) {
         UUID userId = authContextService.currentUserId();
-        UserSectionSubscription sub = subscriptionRepository.findByIdAndUser_Id(id, userId)
-                .orElseThrow(() -> new RuntimeException("Subscription not found: " + id));
-
-        sub.setEnabled(!sub.isEnabled());
-        UserSectionSubscription savedSub = subscriptionRepository.save(sub);
-        return toSubscribedResp(savedSub);
-    }
-
-    /**
-     * Deletes all subscriptions matching a course display name for the current user.
-     *
-     * @param courseDisplayName display name rendered by the frontend, for example "COMP SCI 577"
-     */
-    @Transactional
-    public void deleteTask(String courseDisplayName) {
-        UUID userId = authContextService.currentUserId();
-        List<UserSectionSubscription> subs = subscriptionRepository.findAllByUser_Id(userId);
-        List<UserSectionSubscription> matchingSubs = subs.stream()
-                .filter(sub -> courseDisplayName.equalsIgnoreCase(buildCourseDisplayName(sub.getSection().getCourse())))
-                .toList();
-        if (!matchingSubs.isEmpty()) {
-            subscriptionRepository.deleteAll(matchingSubs);
-        }
+        UserSectionSubscription sub = subscriptionRepository.findByUser_IdAndSection_SectionId(userId, sectionId)
+                .orElseThrow(() -> new RuntimeException("Subscription not found for section: " + sectionId));
+        sub.setEnabled(false);
+        subscriptionRepository.save(sub);
     }
 
     /**

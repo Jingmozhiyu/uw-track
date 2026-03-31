@@ -64,8 +64,9 @@ public class SecurityConfig {
                         // Permit access to authentication endpoints (e.g., login, register)
                         .requestMatchers("/auth/**").permitAll()
 
-                        // Require authentication for specific API endpoints
+                        // Require authentication for user and admin API endpoints
                         .requestMatchers("/api/tasks/**").authenticated()
+                        .requestMatchers("/api/admin/**").authenticated()
 
                         // NOTE: Permitting all other requests by default (Fail-Open approach).
                         // For stricter security, consider changing this to .anyRequest().authenticated()

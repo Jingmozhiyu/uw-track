@@ -1,6 +1,7 @@
 package com.jing.monitor.service;
 
 import com.jing.monitor.model.User;
+import com.jing.monitor.model.UserRole;
 import com.jing.monitor.repository.UserRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -33,14 +34,30 @@ public class AdminBootstrapService {
      */
     @PostConstruct
     public void initAdminUser() {
-        userRepository.findByEmail(adminEmail)
+        backfillNullRoles();
+
+        User admin = userRepository.findByEmail(adminEmail)
                 .orElseGet(() -> {
                     User user = new User(adminEmail, passwordEncoder.encode(adminPassword));
+                    user.setRole(UserRole.ADMIN);
                     User saved = userRepository.save(user);
                     log.info("[Auth] Created admin user {}", adminEmail);
                     return saved;
                 });
+        if (admin.getRole() != UserRole.ADMIN) {
+            admin.setRole(UserRole.ADMIN);
+            userRepository.save(admin);
+        }
         logLegacyTasksTable();
+    }
+
+    private void backfillNullRoles() {
+        userRepository.findAll().stream()
+                .filter(user -> user.getRole() == null)
+                .forEach(user -> {
+                    user.setRole(UserRole.USER);
+                    userRepository.save(user);
+                });
     }
 
     private void logLegacyTasksTable() {
