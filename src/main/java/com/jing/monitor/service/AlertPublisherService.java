@@ -36,12 +36,32 @@ public class AlertPublisherService {
      * @param courseDisplayName display name rendered in the email
      */
     public void publishAlert(AlertType alertType, String recipientEmail, String sectionId, String courseDisplayName) {
+        publishAlert(alertType, recipientEmail, sectionId, courseDisplayName, false);
+    }
+
+    /**
+     * Publishes one alert event for asynchronous processing.
+     *
+     * @param alertType alert category
+     * @param recipientEmail email recipient
+     * @param sectionId section identifier
+     * @param courseDisplayName display name rendered in the email
+     * @param manualTest whether this event comes from the admin test endpoint
+     */
+    public void publishAlert(
+            AlertType alertType,
+            String recipientEmail,
+            String sectionId,
+            String courseDisplayName,
+            boolean manualTest
+    ) {
         AlertEvent event = new AlertEvent();
         event.setEventId(UUID.randomUUID());
         event.setAlertType(alertType);
         event.setRecipientEmail(recipientEmail);
         event.setSectionId(sectionId);
         event.setCourseDisplayName(courseDisplayName);
+        event.setManualTest(manualTest);
         event.setCreatedAt(LocalDateTime.now());
 
         rabbitTemplate.convertAndSend(alertExchangeName, alertRoutingKey, event);

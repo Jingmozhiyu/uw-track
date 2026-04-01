@@ -3,9 +3,11 @@ package com.jing.monitor.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jing.monitor.model.AlertDeadLetter;
+import com.jing.monitor.model.AlertDeliveryLog;
 import com.jing.monitor.model.AlertType;
 import com.jing.monitor.model.event.AlertEvent;
 import com.jing.monitor.repository.AlertDeadLetterRepository;
+import com.jing.monitor.repository.AlertDeliveryLogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
@@ -28,6 +30,7 @@ public class AlertConsumerService {
 
     private final MailService mailService;
     private final AlertDeadLetterRepository alertDeadLetterRepository;
+    private final AlertDeliveryLogRepository alertDeliveryLogRepository;
     private final ObjectMapper objectMapper;
 
     @Value("${app.rabbitmq.queue}")
@@ -48,6 +51,8 @@ public class AlertConsumerService {
             } else {
                 throw new IllegalArgumentException("Unsupported alert type: " + event.getAlertType());
             }
+
+            saveDeliveryLogQuietly(event);
         } catch (Exception e) {
             log.error("[AlertConsumer] Mail send failed for event {} on queue {}", event.getEventId(), alertQueueName, e);
             throw new AmqpRejectAndDontRequeueException("Mail send failed: " + e.getMessage(), e);
@@ -56,6 +61,7 @@ public class AlertConsumerService {
 
     /**
      * Persists dead-letter events for manual inspection and follow-up.
+     * Spring AMQP calls this method automatically after a rejected message lands in the DLQ.
      *
      * @param event dead-lettered alert payload
      * @param message raw AMQP message with dead-letter headers
@@ -109,6 +115,23 @@ public class AlertConsumerService {
             return objectMapper.writeValueAsString(event);
         } catch (JsonProcessingException e) {
             return "{\"serializationError\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    private void saveDeliveryLogQuietly(AlertEvent event) {
+        try {
+            AlertDeliveryLog deliveryLog = new AlertDeliveryLog();
+            deliveryLog.setEventId(event.getEventId());
+            deliveryLog.setAlertType(event.getAlertType().name());
+            deliveryLog.setRecipientEmail(event.getRecipientEmail());
+            deliveryLog.setSectionId(event.getSectionId());
+            deliveryLog.setCourseDisplayName(event.getCourseDisplayName());
+            deliveryLog.setSourceQueue(alertQueueName);
+            deliveryLog.setManualTest(event.isManualTest());
+            deliveryLog.setSentAt(LocalDateTime.now());
+            alertDeliveryLogRepository.save(deliveryLog);
+        } catch (Exception e) {
+            log.error("[AlertConsumer] Mail was sent, but delivery log persistence failed for event {}", event.getEventId(), e);
         }
     }
 }

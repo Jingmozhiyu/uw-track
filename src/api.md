@@ -142,6 +142,8 @@ Response:
 
 ## Admin
 
+Admin APIs are internal/admin-only. Keep them in version control, but do not expose them in a public-facing product doc.
+
 ### `GET /api/admin/subscriptions`
 
 Meaning:
@@ -191,6 +193,70 @@ Body:
 - None
 
 Response `data`: `AdminSectionSubRespDto`
+
+### `GET /api/admin/dead-letters`
+
+Meaning:
+- List failed alert events that were rejected by the mail consumer and routed into the DLQ
+
+Response `data`: `AlertDeadLetterRespDto[]`
+
+### `GET /api/admin/mail-deliveries`
+
+Meaning:
+- List successful email deliveries
+- Useful for counting sent emails without mixing in dead letters
+
+Response `data`: `AlertDeliveryLogRespDto[]`
+
+```json
+[
+  {
+    "id": "delivery-uuid",
+    "eventId": "event-uuid",
+    "alertType": "OPEN",
+    "recipientEmail": "user@example.com",
+    "sectionId": "66400",
+    "courseDisplayName": "COMP SCI 240",
+    "sourceQueue": "uwtrack.alert.queue",
+    "manualTest": false,
+    "sentAt": "2026-03-31T14:30:00"
+  }
+]
+```
+
+### `POST /api/admin/test-email`
+
+Meaning:
+- Enqueue one manual test email through RabbitMQ
+- This uses the same consumer/mail pipeline as scheduler-generated alerts
+
+Request body:
+
+```json
+{
+  "recipientEmail": "admin@example.com",
+  "alertType": "OPEN",
+  "sectionId": "99999",
+  "courseDisplayName": "TEST COURSE"
+}
+```
+
+Notes:
+- `recipientEmail` is optional; if omitted, the backend falls back to the current admin's email
+- `alertType` defaults to `OPEN`
+- `sectionId` defaults to `99999`
+- `courseDisplayName` defaults to `TEST COURSE`
+
+Response:
+
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": null
+}
+```
 
 ## Error Handling
 

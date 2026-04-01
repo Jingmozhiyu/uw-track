@@ -1,15 +1,20 @@
 package com.jing.monitor.service;
 
 import com.jing.monitor.model.AlertDeadLetter;
+import com.jing.monitor.model.AlertDeliveryLog;
+import com.jing.monitor.model.AlertType;
 import com.jing.monitor.model.Course;
 import com.jing.monitor.model.CourseSection;
 import com.jing.monitor.model.User;
 import com.jing.monitor.model.UserRole;
 import com.jing.monitor.model.UserSectionSubscription;
 import com.jing.monitor.model.dto.AdminSectionSubRespDto;
+import com.jing.monitor.model.dto.AdminTestEmailReqDto;
 import com.jing.monitor.model.dto.AdminUserSubsRespDto;
 import com.jing.monitor.model.dto.AlertDeadLetterRespDto;
+import com.jing.monitor.model.dto.AlertDeliveryLogRespDto;
 import com.jing.monitor.repository.AlertDeadLetterRepository;
+import com.jing.monitor.repository.AlertDeliveryLogRepository;
 import com.jing.monitor.repository.UserRepository;
 import com.jing.monitor.repository.UserSectionSubscriptionRepository;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +37,8 @@ public class AdminService {
     private final UserRepository userRepository;
     private final UserSectionSubscriptionRepository subscriptionRepository;
     private final AlertDeadLetterRepository alertDeadLetterRepository;
+    private final AlertDeliveryLogRepository alertDeliveryLogRepository;
+    private final AlertPublisherService alertPublisherService;
     private final AuthContextService authContextService;
 
     /**
@@ -95,13 +102,43 @@ public class AdminService {
                 .toList();
     }
 
-    private void requireAdmin() {
+    /**
+     * Returns successful email delivery records so admin can count sent alerts without mixing in failures.
+     *
+     * @return successful email deliveries ordered from newest to oldest
+     */
+    @Transactional(readOnly = true)
+    public List<AlertDeliveryLogRespDto> getMailDeliveries() {
+        requireAdmin();
+        return alertDeliveryLogRepository.findAll().stream()
+                .sorted(Comparator.comparing(AlertDeliveryLog::getSentAt).reversed())
+                .map(this::toDeliveryLogResp)
+                .toList();
+    }
+
+    /**
+     * Enqueues one admin-triggered test email through the same RabbitMQ path used by scheduler alerts.
+     *
+     * @param req admin test mail request
+     */
+    public void sendTestEmail(AdminTestEmailReqDto req) {
+        User currentAdmin = requireAdmin();
+        String recipientEmail = firstNonBlank(req.getRecipientEmail(), currentAdmin.getEmail());
+        AlertType alertType = req.getAlertType() == null ? AlertType.OPEN : req.getAlertType();
+        String sectionId = firstNonBlank(req.getSectionId(), "99999");
+        String courseDisplayName = firstNonBlank(req.getCourseDisplayName(), "TEST COURSE");
+
+        alertPublisherService.publishAlert(alertType, recipientEmail, sectionId, courseDisplayName, true);
+    }
+
+    private User requireAdmin() {
         UUID currentUserId = authContextService.currentUserId();
         User currentUser = userRepository.findById(currentUserId)
                 .orElseThrow(() -> new RuntimeException("Unauthorized"));
         if (currentUser.getRole() != UserRole.ADMIN) {
             throw new RuntimeException("Unauthorized");
         }
+        return currentUser;
     }
 
     private AdminSectionSubRespDto toAdminSubResp(UserSectionSubscription sub) {
@@ -145,5 +182,26 @@ public class AdminService {
         dto.setCreatedAt(deadLetter.getCreatedAt());
         dto.setPayloadJson(deadLetter.getPayloadJson());
         return dto;
+    }
+
+    private AlertDeliveryLogRespDto toDeliveryLogResp(AlertDeliveryLog deliveryLog) {
+        AlertDeliveryLogRespDto dto = new AlertDeliveryLogRespDto();
+        dto.setId(deliveryLog.getId());
+        dto.setEventId(deliveryLog.getEventId());
+        dto.setAlertType(deliveryLog.getAlertType());
+        dto.setRecipientEmail(deliveryLog.getRecipientEmail());
+        dto.setSectionId(deliveryLog.getSectionId());
+        dto.setCourseDisplayName(deliveryLog.getCourseDisplayName());
+        dto.setSourceQueue(deliveryLog.getSourceQueue());
+        dto.setManualTest(deliveryLog.isManualTest());
+        dto.setSentAt(deliveryLog.getSentAt());
+        return dto;
+    }
+
+    private String firstNonBlank(String preferred, String fallback) {
+        if (preferred != null && !preferred.isBlank()) {
+            return preferred.trim();
+        }
+        return fallback;
     }
 }

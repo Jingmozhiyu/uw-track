@@ -1,6 +1,5 @@
-package com.jing.monitor.model.event;
+package com.jing.monitor.model.dto;
 
-import com.jing.monitor.model.AlertType;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -8,17 +7,19 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Notification event published by the scheduler and consumed by the mail worker.
+ * Admin-facing response DTO for one successful email delivery.
  */
 @Data
 @NoArgsConstructor
-public class AlertEvent {
+public class AlertDeliveryLogRespDto {
 
+    private UUID id;
     private UUID eventId;
-    private AlertType alertType;
+    private String alertType;
     private String recipientEmail;
     private String sectionId;
     private String courseDisplayName;
+    private String sourceQueue;
     private boolean manualTest;
-    private LocalDateTime createdAt;
+    private LocalDateTime sentAt;
 }
