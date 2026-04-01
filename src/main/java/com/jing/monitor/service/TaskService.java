@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -121,7 +122,9 @@ public class TaskService {
         UserSectionSubscription existingSub = subscriptionRepository.findByUser_IdAndSection_SectionId(userId, sectionId)
                 .orElse(null);
         if (existingSub != null) {
-            return toSubscribedResp(existingSub);
+            existingSub.setEnabled(true);
+            armCourseForImmediatePolling(existingSub.getSection().getCourse());
+            return toSubscribedResp(subscriptionRepository.save(existingSub));
         }
 
         User user = userRepository.getReferenceById(userId);
@@ -130,6 +133,7 @@ public class TaskService {
         sub.setSection(section);
         sub.setEnabled(true);
         UserSectionSubscription savedSub = subscriptionRepository.save(sub);
+        armCourseForImmediatePolling(section.getCourse());
         return toSubscribedResp(savedSub);
     }
 
@@ -262,6 +266,15 @@ public class TaskService {
         if (sectionId == null || !sectionId.matches("\\d{5}")) {
             throw new RuntimeException("Section id must be a 5-digit number.");
         }
+    }
+
+    private void armCourseForImmediatePolling(Course course) {
+        if (course == null) {
+            return;
+        }
+        course.setUnchangedPollCount(0);
+        course.setNextPollAt(LocalDateTime.now());
+        courseRepository.save(course);
     }
 
     /**

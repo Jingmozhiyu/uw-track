@@ -249,6 +249,34 @@ Response `data`: `MailDailyStatRespDto[]`
 ]
 ```
 
+### `GET /api/admin/scheduler-status`
+
+Meaning:
+- Return an internal scheduler snapshot for operational debugging
+- Useful for checking queue backlog, due course count, and recent fetch activity
+
+Response `data`: `SchedulerStatusRespDto`
+
+```json
+{
+  "observedAt": "2026-04-01T18:30:00",
+  "heartbeatIntervalMs": 1000,
+  "fetchIntervalMs": 3000,
+  "activeCourseCount": 12,
+  "dueCourseCount": 4,
+  "queueSize": 3,
+  "queuedCourseIds": [
+    "011630",
+    "011632",
+    "011635"
+  ],
+  "lastHeartbeatAt": "2026-04-01T18:29:59",
+  "lastFetchStartedAt": "2026-04-01T18:29:57",
+  "lastFetchFinishedAt": "2026-04-01T18:29:58",
+  "lastFetchedCourseId": "011628"
+}
+```
+
 ### `POST /api/admin/test-email`
 
 Meaning:

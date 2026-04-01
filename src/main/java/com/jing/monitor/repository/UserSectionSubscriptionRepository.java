@@ -3,6 +3,7 @@ package com.jing.monitor.repository;
 import com.jing.monitor.model.UserSectionSubscription;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
@@ -27,6 +28,18 @@ public interface UserSectionSubscriptionRepository extends JpaRepository<UserSec
 
     @EntityGraph(attributePaths = {"user", "section", "section.course"})
     List<UserSectionSubscription> findAllByEnabledTrue();
+
+    @EntityGraph(attributePaths = {"user", "section", "section.course"})
+    List<UserSectionSubscription> findAllByEnabledTrueAndSection_Course_CourseId(String courseId);
+
+    boolean existsByEnabledTrueAndSection_Course_CourseId(String courseId);
+
+    @Query("""
+            select count(distinct sub.section.course.courseId)
+            from UserSectionSubscription sub
+            where sub.enabled = true
+            """)
+    long countDistinctEnabledCourses();
 
     @EntityGraph(attributePaths = {"user", "section", "section.course"})
     Optional<UserSectionSubscription> findByUser_IdAndSection_SectionId(UUID userId, String sectionId);

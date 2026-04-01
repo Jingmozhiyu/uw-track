@@ -7,6 +7,7 @@ import com.jing.monitor.model.dto.AdminUserSubsRespDto;
 import com.jing.monitor.model.dto.AlertDeadLetterRespDto;
 import com.jing.monitor.model.dto.AlertDeliveryLogRespDto;
 import com.jing.monitor.model.dto.MailDailyStatRespDto;
+import com.jing.monitor.model.dto.SchedulerStatusRespDto;
 import com.jing.monitor.service.AdminService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -90,5 +91,15 @@ public class AdminController {
     public Result<Void> sendTestEmail(@RequestBody AdminTestEmailReqDto req) {
         adminService.sendTestEmail(req);
         return Result.success();
+    }
+
+    /**
+     * Returns an internal scheduler snapshot for operational debugging.
+     *
+     * @return scheduler status snapshot
+     */
+    @GetMapping("/scheduler-status")
+    public Result<SchedulerStatusRespDto> getSchedulerStatus() {
+        return Result.success(adminService.getSchedulerStatus());
     }
 }

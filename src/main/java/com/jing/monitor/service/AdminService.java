@@ -14,14 +14,17 @@ import com.jing.monitor.model.dto.AdminUserSubsRespDto;
 import com.jing.monitor.model.dto.AlertDeadLetterRespDto;
 import com.jing.monitor.model.dto.AlertDeliveryLogRespDto;
 import com.jing.monitor.model.dto.MailDailyStatRespDto;
+import com.jing.monitor.model.dto.SchedulerStatusRespDto;
 import com.jing.monitor.repository.AlertDeadLetterRepository;
 import com.jing.monitor.repository.AlertDeliveryLogRepository;
+import com.jing.monitor.repository.CourseRepository;
 import com.jing.monitor.repository.UserRepository;
 import com.jing.monitor.repository.UserSectionSubscriptionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,8 +42,10 @@ public class AdminService {
     private final UserSectionSubscriptionRepository subscriptionRepository;
     private final AlertDeadLetterRepository alertDeadLetterRepository;
     private final AlertDeliveryLogRepository alertDeliveryLogRepository;
+    private final CourseRepository courseRepository;
     private final AlertPublisherService alertPublisherService;
     private final MailCounterService mailCounterService;
+    private final SchedulerService schedulerService;
     private final AuthContextService authContextService;
 
     /**
@@ -87,6 +92,9 @@ public class AdminService {
                 .orElseThrow(() -> new RuntimeException("Subscription not found: " + subscriptionId));
         sub.setEnabled(enabled);
         UserSectionSubscription savedSub = subscriptionRepository.save(sub);
+        if (enabled) {
+            armCourseForImmediatePolling(savedSub.getSection().getCourse());
+        }
         return toAdminSubResp(savedSub);
     }
 
@@ -142,6 +150,17 @@ public class AdminService {
         String courseDisplayName = firstNonBlank(req.getCourseDisplayName(), "TEST COURSE");
 
         alertPublisherService.publishAlert(alertType, recipientEmail, sectionId, courseDisplayName, true);
+    }
+
+    /**
+     * Returns an internal scheduler snapshot for admin diagnostics.
+     *
+     * @return scheduler status snapshot
+     */
+    @Transactional(readOnly = true)
+    public SchedulerStatusRespDto getSchedulerStatus() {
+        requireAdmin();
+        return schedulerService.getSchedulerStatus();
     }
 
     private User requireAdmin() {
@@ -216,5 +235,14 @@ public class AdminService {
             return preferred.trim();
         }
         return fallback;
+    }
+
+    private void armCourseForImmediatePolling(Course course) {
+        if (course == null) {
+            return;
+        }
+        course.setUnchangedPollCount(0);
+        course.setNextPollAt(LocalDateTime.now());
+        courseRepository.save(course);
     }
 }

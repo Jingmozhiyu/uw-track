@@ -9,6 +9,7 @@ import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
@@ -40,7 +41,17 @@ public class Course {
     @Column(name = "catalog_number", nullable = false)
     private String catalogNumber;
 
+    @Column(name = "last_polled_at")
+    private LocalDateTime lastPolledAt;
+
+    @Column(name = "next_poll_at")
+    private LocalDateTime nextPollAt;
+
+    @Column(name = "unchanged_poll_count", nullable = false)
+    private Integer unchangedPollCount = 0;
+
     public Course(String courseId) {
         this.courseId = courseId;
+        this.unchangedPollCount = 0;
     }
 }
