@@ -18,9 +18,11 @@ public class MailDailyStatRespDto {
     private long sentTotal;
     private long sentOpen;
     private long sentWaitlist;
+    private long sentWelcome;
     private long sentManualTest;
     private long deadTotal;
     private long deadOpen;
     private long deadWaitlist;
+    private long deadWelcome;
     private long deadManualTest;
 }

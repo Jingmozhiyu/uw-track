@@ -270,10 +270,12 @@ Response `data`: `MailDailyStatRespDto[]`
     "sentTotal": 12,
     "sentOpen": 8,
     "sentWaitlist": 4,
+    "sentWelcome": 2,
     "sentManualTest": 1,
     "deadTotal": 2,
     "deadOpen": 1,
     "deadWaitlist": 1,
+    "deadWelcome": 0,
     "deadManualTest": 0
   }
 ]

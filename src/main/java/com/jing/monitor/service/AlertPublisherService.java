@@ -67,4 +67,13 @@ public class AlertPublisherService {
         rabbitTemplate.convertAndSend(alertExchangeName, alertRoutingKey, event);
         log.info("[AlertPublisher] Published {} alert event {} for section {} to {}", alertType, event.getEventId(), sectionId, recipientEmail);
     }
+
+    /**
+     * Publishes one welcome email event for a newly registered user.
+     *
+     * @param recipientEmail email recipient
+     */
+    public void publishWelcomeEmail(String recipientEmail) {
+        publishAlert(AlertType.WELCOME, recipientEmail, "WELCOME", "Welcome to MadEnroll", false);
+    }
 }

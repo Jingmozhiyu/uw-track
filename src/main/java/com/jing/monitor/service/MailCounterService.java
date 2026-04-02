@@ -55,6 +55,8 @@ public class MailCounterService {
             redisTemplate.opsForHash().increment(key, "sent_open", 1);
         } else if (event.getAlertType() == AlertType.WAITLIST) {
             redisTemplate.opsForHash().increment(key, "sent_waitlist", 1);
+        } else if (event.getAlertType() == AlertType.WELCOME) {
+            redisTemplate.opsForHash().increment(key, "sent_welcome", 1);
         }
 
         if (event.isManualTest()) {
@@ -75,6 +77,8 @@ public class MailCounterService {
             redisTemplate.opsForHash().increment(key, "dead_open", 1);
         } else if (event != null && event.getAlertType() == AlertType.WAITLIST) {
             redisTemplate.opsForHash().increment(key, "dead_waitlist", 1);
+        } else if (event != null && event.getAlertType() == AlertType.WELCOME) {
+            redisTemplate.opsForHash().increment(key, "dead_welcome", 1);
         }
 
         if (event != null && event.isManualTest()) {
@@ -134,10 +138,12 @@ public class MailCounterService {
         entity.setSentTotal(stats.getOrDefault("sent_total", 0L));
         entity.setSentOpen(stats.getOrDefault("sent_open", 0L));
         entity.setSentWaitlist(stats.getOrDefault("sent_waitlist", 0L));
+        entity.setSentWelcome(stats.getOrDefault("sent_welcome", 0L));
         entity.setSentManualTest(stats.getOrDefault("sent_manual_test", 0L));
         entity.setDeadTotal(stats.getOrDefault("dead_total", 0L));
         entity.setDeadOpen(stats.getOrDefault("dead_open", 0L));
         entity.setDeadWaitlist(stats.getOrDefault("dead_waitlist", 0L));
+        entity.setDeadWelcome(stats.getOrDefault("dead_welcome", 0L));
         entity.setDeadManualTest(stats.getOrDefault("dead_manual_test", 0L));
         mailDailyStatRepository.save(entity);
         redisTemplate.delete(key);
@@ -177,10 +183,12 @@ public class MailCounterService {
         dto.setSentTotal(entity.getSentTotal());
         dto.setSentOpen(entity.getSentOpen());
         dto.setSentWaitlist(entity.getSentWaitlist());
+        dto.setSentWelcome(entity.getSentWelcome());
         dto.setSentManualTest(entity.getSentManualTest());
         dto.setDeadTotal(entity.getDeadTotal());
         dto.setDeadOpen(entity.getDeadOpen());
         dto.setDeadWaitlist(entity.getDeadWaitlist());
+        dto.setDeadWelcome(entity.getDeadWelcome());
         dto.setDeadManualTest(entity.getDeadManualTest());
         return dto;
     }

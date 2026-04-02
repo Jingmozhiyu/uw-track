@@ -6,6 +6,8 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 /**
@@ -40,11 +42,30 @@ public class MailService {
         log.info("[Mail] Preparing to send OPEN alert for section {} to {}", section, recipientEmail);
 
         try {
+            // Encode the courseInfo (e.g. "comp sci 577" -> "comp+sci+577") to build a valid URL
+            String encodedCourse = URLEncoder.encode(courseInfo, StandardCharsets.UTF_8);
+            String enrollLink = "https://enroll.wisc.edu/search?keywords=" + encodedCourse;
+
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);
             message.setTo(requireRecipientEmail(recipientEmail));
-            message.setSubject("🔥 Alert: Section " + section + " IS OPEN! 🔥");
-            message.setText("Go to Enroll!\n\nCourse Info: " + courseInfo + "\n\n(This email is sent automatically by UW-Course-Monitor)");
+
+            // Optimized Subject
+            message.setSubject("🟢 OPEN SEAT ALERT: " + courseInfo + " (Section " + section + ")");
+
+            // Optimized Body
+            message.setText(
+                    "Great news!\n\n" +
+                            "A seat has just opened up for your monitored course.\n\n" +
+                            "📚 Course: " + courseInfo + "\n" +
+                            "🔖 Section: " + section + "\n" +
+                            "🟢 Status: OPEN\n\n" +
+                            "Click the link below to go directly to Course Search & Enroll:\n" +
+                            "👉 " + enrollLink + "\n\n" +
+                            "Fingers crossed for your enrollment!\n\n" +
+                            "---\n" +
+                            "Automated alert from MadEnroll"
+            );
 
             mailSender.send(message);
             log.info("[Mail] OPEN alert email sent successfully for section {} to {}", section, recipientEmail);
@@ -65,17 +86,69 @@ public class MailService {
         log.info("[Mail] Preparing to send WAITLIST alert for section {} to {}", section, recipientEmail);
 
         try {
+            // Encode the courseInfo (e.g. "comp sci 577" -> "comp+sci+577") to build a valid URL
+            String encodedCourse = URLEncoder.encode(courseInfo, StandardCharsets.UTF_8);
+            String enrollLink = "https://enroll.wisc.edu/search?keywords=" + encodedCourse;
+
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);
             message.setTo(requireRecipientEmail(recipientEmail));
-            message.setSubject("🔥 ALERT: Section " + section + " HAS WAITLIST SEATS! 🔥");
-            message.setText("Go to Enroll!\n\nCourse Info: " + courseInfo + "\n\n(This email is sent automatically by UW-Course-Monitor)");
+
+            // Optimized Subject
+            message.setSubject("🟡 WAITLIST ALERT: " + courseInfo + " (Section " + section + ")");
+
+            // Optimized Body
+            message.setText(
+                    "Hello,\n\n" +
+                            "A waitlist spot has just opened up for your monitored course.\n\n" +
+                            "📚 Course: " + courseInfo + "\n" +
+                            "🔖 Section: " + section + "\n" +
+                            "🟡 Status: WAITLISTED\n\n" +
+                            "Click the link below to secure your spot via Course Search & Enroll:\n" +
+                            "👉 " + enrollLink + "\n\n" +
+                            "Fingers crossed for your enrollment!\n\n" +
+                            "---\n" +
+                            "Automated alert from MadEnroll"
+            );
 
             mailSender.send(message);
             log.info("[Mail] WAITLIST alert email sent successfully for section {} to {}", section, recipientEmail);
         } catch (Exception e) {
             log.error("[Mail] Failed to send WAITLIST alert email for section {} to {}", section, recipientEmail, e);
             throw new IllegalStateException("Failed to send WAITLIST alert email.", e);
+        }
+    }
+
+    /**
+     * Sends a welcome email to a newly registered user.
+     *
+     * @param recipientEmail recipient mailbox
+     */
+    public void sendWelcomeEmail(String recipientEmail) {
+        log.info("[Mail] Preparing to send welcome email to {}", recipientEmail);
+
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromEmail);
+            message.setTo(requireRecipientEmail(recipientEmail));
+            message.setSubject("Welcome to MadEnroll");
+            message.setText(
+                    "Welcome to MadEnroll!\n\n" +
+                            "Your account has been created successfully.\n\n" +
+                            "You can now:\n" +
+                            "- search courses across supported subjects\n" +
+                            "- subscribe to specific sections\n" +
+                            "- receive automatic OPEN and WAITLIST alerts by email\n\n" +
+                            "We are excited to help you track the classes you care about.\n\n" +
+                            "---\n" +
+                            "Automated message from MadEnroll"
+            );
+
+            mailSender.send(message);
+            log.info("[Mail] Welcome email sent successfully to {}", recipientEmail);
+        } catch (Exception e) {
+            log.error("[Mail] Failed to send welcome email to {}", recipientEmail, e);
+            throw new IllegalStateException("Failed to send welcome email.", e);
         }
     }
 

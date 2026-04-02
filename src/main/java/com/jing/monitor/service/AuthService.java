@@ -21,6 +21,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final AlertPublisherService alertPublisherService;
 
     /**
      * Registers a new user account.
@@ -39,7 +40,8 @@ public class AuthService {
 
         User user = new User(email, passwordEncoder.encode(password));
         user.setRole(UserRole.USER);
-        userRepository.save(user);
+        User savedUser = userRepository.save(user);
+        alertPublisherService.publishWelcomeEmail(savedUser.getEmail());
     }
 
     /**

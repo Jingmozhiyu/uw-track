@@ -38,6 +38,9 @@ public class MailDailyStat {
     @Column(name = "sent_waitlist", nullable = false)
     private long sentWaitlist;
 
+    @Column(name = "sent_welcome", nullable = false)
+    private long sentWelcome;
+
     @Column(name = "sent_manual_test", nullable = false)
     private long sentManualTest;
 
@@ -49,6 +52,9 @@ public class MailDailyStat {
 
     @Column(name = "dead_waitlist", nullable = false)
     private long deadWaitlist;
+
+    @Column(name = "dead_welcome", nullable = false)
+    private long deadWelcome;
 
     @Column(name = "dead_manual_test", nullable = false)
     private long deadManualTest;

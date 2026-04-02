@@ -5,5 +5,6 @@ package com.jing.monitor.model;
  */
 public enum AlertType {
     OPEN,
-    WAITLIST
+    WAITLIST,
+    WELCOME
 }
