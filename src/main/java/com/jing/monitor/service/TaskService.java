@@ -37,6 +37,7 @@ import java.util.Locale;
 @Slf4j
 public class TaskService {
 
+    private static final long MAX_ENABLED_SECTION_SUBSCRIPTIONS = 15;
     private static final Duration SEARCH_MISS_TTL = Duration.ofMinutes(2);
 
     private final CourseCrawler crawler;
@@ -123,11 +124,13 @@ public class TaskService {
         UserSectionSubscription existingSub = subscriptionRepository.findByUser_IdAndSection_SectionId(userId, sectionId)
                 .orElse(null);
         if (existingSub != null) {
+            ensureSectionSubscriptionCapacity(userId, existingSub.isEnabled());
             existingSub.setEnabled(true);
             armCourseForImmediatePolling(existingSub.getSection().getCourse());
             return toSubscribedResp(subscriptionRepository.save(existingSub));
         }
 
+        ensureSectionSubscriptionCapacity(userId, false);
         User user = userRepository.getReferenceById(userId);
         UserSectionSubscription sub = new UserSectionSubscription();
         sub.setUser(user);
@@ -280,6 +283,22 @@ public class TaskService {
         course.setUnchangedPollCount(0);
         course.setNextPollAt(LocalDateTime.now());
         courseRepository.save(course);
+    }
+
+    /**
+     * Enforces the per-user cap on enabled section subscriptions.
+     *
+     * @param userId owner of the subscription
+     * @param alreadyEnabled whether the target subscription is already enabled
+     */
+    private void ensureSectionSubscriptionCapacity(UUID userId, boolean alreadyEnabled) {
+        if (alreadyEnabled) {
+            return;
+        }
+        long enabledCount = subscriptionRepository.countByUser_IdAndEnabledTrue(userId);
+        if (enabledCount >= MAX_ENABLED_SECTION_SUBSCRIPTIONS) {
+            throw new RuntimeException("You can monitor at most 15 sections at the same time.");
+        }
     }
 
     /**

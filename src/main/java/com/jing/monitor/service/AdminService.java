@@ -38,6 +38,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AdminService {
 
+    private static final long MAX_ENABLED_SECTION_SUBSCRIPTIONS = 15;
+
     private final UserRepository userRepository;
     private final UserSectionSubscriptionRepository subscriptionRepository;
     private final AlertDeadLetterRepository alertDeadLetterRepository;
@@ -90,6 +92,7 @@ public class AdminService {
         requireAdmin();
         UserSectionSubscription sub = subscriptionRepository.findById(subscriptionId)
                 .orElseThrow(() -> new RuntimeException("Subscription not found: " + subscriptionId));
+        ensureSectionSubscriptionCapacity(sub, enabled);
         sub.setEnabled(enabled);
         UserSectionSubscription savedSub = subscriptionRepository.save(sub);
         if (enabled) {
@@ -244,5 +247,15 @@ public class AdminService {
         course.setUnchangedPollCount(0);
         course.setNextPollAt(LocalDateTime.now());
         courseRepository.save(course);
+    }
+
+    private void ensureSectionSubscriptionCapacity(UserSectionSubscription sub, boolean targetEnabled) {
+        if (!targetEnabled || sub.isEnabled()) {
+            return;
+        }
+        long enabledCount = subscriptionRepository.countByUser_IdAndEnabledTrue(sub.getUser().getId());
+        if (enabledCount >= MAX_ENABLED_SECTION_SUBSCRIPTIONS) {
+            throw new RuntimeException("This user can monitor at most 15 sections at the same time.");
+        }
     }
 }

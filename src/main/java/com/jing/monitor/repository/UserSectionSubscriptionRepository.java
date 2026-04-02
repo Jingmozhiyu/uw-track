@@ -43,4 +43,6 @@ public interface UserSectionSubscriptionRepository extends JpaRepository<UserSec
 
     @EntityGraph(attributePaths = {"user", "section", "section.course"})
     Optional<UserSectionSubscription> findByUser_IdAndSection_SectionId(UUID userId, String sectionId);
+
+    long countByUser_IdAndEnabledTrue(UUID userId);
 }
