@@ -28,6 +28,8 @@ Frontend repository:
 ### 4/1/2026
 This project was refactored across many aspects.
 
+In short, it was updated from a basic monitor into a more production-oriented system with better structure, observability, safety, and deployment readiness.
+
 Main changes:
 - Reworked the data model from the old task-centric structure to `users`, `courses`, `course_sections`, and `user_section_subscriptions`
 - Changed polling from per-user fetching to course-level deduplicated crawling
@@ -37,8 +39,6 @@ Main changes:
 - Split user APIs and admin APIs more clearly
 - Added admin monitoring endpoints for subscriptions, dead letters, mail deliveries, mail stats, and scheduler status
 - Completed Docker Compose + Caddy deployment files so the project is close to plug-and-play on a VM
-
-In short, 4.2 turned the project from a basic monitor into a more production-oriented system with better structure, observability, safety, and deployment readiness.
 
 ## Deployment
 
