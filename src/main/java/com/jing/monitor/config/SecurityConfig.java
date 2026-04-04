@@ -69,6 +69,7 @@ public class SecurityConfig {
 
                         // Permit access to authentication endpoints (e.g., login, register)
                         .requestMatchers("/auth/**").permitAll()
+                        .requestMatchers("/api/feedback/**").permitAll()
 
                         // Require authentication for user and admin API endpoints
                         .requestMatchers("/api/tasks/**").authenticated()

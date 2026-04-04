@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -84,10 +85,10 @@ public class SchedulerService {
 
         int enqueuedCount = 0;
         for (Course course : dueCourses) {
-            if (!subscriptionRepository.existsByEnabledTrueAndSection_Course_CourseId(course.getCourseId())) {
+            if (!subscriptionRepository.existsByEnabledTrueAndSection_Course_Id(course.getId())) {
                 continue;
             }
-            if (enqueueCourseIfAbsent(course.getCourseId(), course.getSubjectCode())) {
+            if (enqueueCourseIfAbsent(course.getId(), course.getCourseId(), course.getTermCode(), course.getSubjectCode())) {
                 enqueuedCount++;
             }
         }
@@ -101,25 +102,26 @@ public class SchedulerService {
      * Fixed-rate crawler worker that consumes at most one due course per interval.
      * This method is the only place where crawler calls happen, which caps global fetch rate.
      */
-    @Scheduled(fixedDelayString = "${monitor.scheduler-fetch-interval-ms:3000}")
+    @Scheduled(fixedDelayString = "${monitor.scheduler-fetch-interval-ms}")
     public void consumeDueCourseQueue() {
         QueuedCourse q = pollNextCourseId();
         if (q == null) {
             return;
         }
-        String courseId = q.courseId;
-        String subjectCode = q.subjectCode;
+        String courseId = q.courseId();
+        String subjectCode = q.subjectCode();
+        String termCode = q.termCode();
         lastFetchStartedAt = LocalDateTime.now();
-        lastFetchedCourseId = courseId;
+        lastFetchedCourseId = termCode + ":" + courseId;
 
-        List<UserSectionSubscription> subs = subscriptionRepository.findAllByEnabledTrueAndSection_Course_CourseId(courseId);
+        List<UserSectionSubscription> subs = subscriptionRepository.findAllByEnabledTrueAndSection_Course_Id(q.courseUuid());
         if (subs.isEmpty()) {
-            log.info("[Scheduler] Dropping queued course {} because it no longer has enabled subscriptions.", courseId);
+            log.info("[Scheduler] Dropping queued course {}:{} because it no longer has enabled subscriptions.", termCode, courseId);
             lastFetchFinishedAt = LocalDateTime.now();
             return;
         }
 
-        processSingleCourse(subjectCode, courseId, subs, LocalDateTime.now());
+        processSingleCourse(termCode, subjectCode, courseId, subs, LocalDateTime.now());
         lastFetchFinishedAt = LocalDateTime.now();
     }
 
@@ -131,7 +133,7 @@ public class SchedulerService {
      * @param subs enabled subscriptions that belong to this course
      * @param polledAt current heartbeat timestamp shared by this course poll
      */
-    private void processSingleCourse(String subjectId, String courseId, List<UserSectionSubscription> subs, LocalDateTime polledAt) {
+    private void processSingleCourse(String termCode, String subjectId, String courseId, List<UserSectionSubscription> subs, LocalDateTime polledAt) {
         Course course = resolveCourse(subs);
         if (course == null) {
             log.warn("[Scheduler] Skipping course {} because no canonical course row could be resolved.", courseId);
@@ -139,7 +141,7 @@ public class SchedulerService {
         }
 
         try {
-            List<SectionInfo> infos = crawler.fetchCourseStatus(subjectId, courseId);
+            List<SectionInfo> infos = crawler.fetchCourseStatus(termCode, subjectId, courseId);
             if (infos == null || infos.isEmpty()) {
                 log.warn("[Scheduler] Fetch failed or returned empty data for course {}", courseId);
                 scheduleAfterFailure(course, polledAt);
@@ -149,31 +151,44 @@ public class SchedulerService {
             // Keep the shared course row current before touching section snapshots.
             course = upsertCourse(course, infos.get(0));
 
-            // existingSectionsBySectionId: section business id -> previously persisted section snapshot.
-            Map<String, CourseSection> existingSectionsBySectionId =
-                    courseSectionRepository.findAllByCourse_CourseId(courseId).stream()
-                            .collect(Collectors.toMap(CourseSection::getSectionId, section -> section, (left, right) -> left, HashMap::new));
+            // existingSectionsByDocId: section doc id -> previously persisted section snapshot.
+            Map<String, CourseSection> existingSectionsByDocId =
+                    courseSectionRepository.findAllByCourse_Id(course.getId()).stream()
+                            .filter(section -> section.getDocId() != null && !section.getDocId().isBlank())
+                            .collect(Collectors.toMap(CourseSection::getDocId, section -> section, (left, right) -> left, HashMap::new));
 
-            // subsBySectionId: section business id -> enabled subs targeting that section.
-            Map<String, List<UserSectionSubscription>> subsBySectionId =
-                    subs.stream().collect(Collectors.groupingBy(sub -> sub.getSection().getSectionId(), HashMap::new, Collectors.toList()));
+            Map<String, List<CourseSection>> existingSectionsBySectionId =
+                    courseSectionRepository.findAllByCourse_Id(course.getId()).stream()
+                            .collect(Collectors.groupingBy(CourseSection::getSectionId, HashMap::new, Collectors.toList()));
+
+            // subsByDocId: section doc id -> enabled subs targeting that section.
+            Map<String, List<UserSectionSubscription>> subsByDocId =
+                    subs.stream().collect(Collectors.groupingBy(sub -> sub.getSection().getDocId(), HashMap::new, Collectors.toList()));
 
             // relevantStateChanged: whether any enabled section changed in status/openSeats/waitlistSeats this round.
             boolean relevantStateChanged = false;
 
             // Apply each fresh crawler snapshot and fan out alerts only on state transitions.
             for (SectionInfo info : infos) {
+                String docId = info.getDocId();
                 String sectionId = info.getSectionId();
                 StatusMapping currentStatus = info.getStatus();
-                CourseSection section = existingSectionsBySectionId.get(sectionId);
+                CourseSection section = existingSectionsByDocId.get(docId);
+                if (section == null) {
+                    List<CourseSection> sameSectionId = existingSectionsBySectionId.getOrDefault(sectionId, List.of());
+                    if (sameSectionId.size() == 1) {
+                        section = sameSectionId.get(0);
+                    }
+                }
                 StatusMapping previousStatus = section == null ? null : section.getLastStatus();
                 Integer previousOpenSeats = section == null ? null : section.getOpenSeats();
                 Integer previousWaitlistSeats = section == null ? null : section.getWaitlistSeats();
 
                 if (section == null) {
                     section = new CourseSection();
+                    section.setDocId(docId);
                     section.setSectionId(sectionId);
-                    log.info("[Scheduler] New section found {}. Adding to DB.", sectionId);
+                    log.info("[Scheduler] New section found {} (docId={}). Adding to DB.", sectionId, docId);
                 }
 
                 section.setCourse(course);
@@ -182,11 +197,12 @@ public class SchedulerService {
                 section.setCapacity(info.getCapacity());
                 section.setWaitlistSeats(info.getWaitlistSeats());
                 section.setWaitlistCapacity(info.getWaitlistCapacity());
+                section.setOnlineOnly(info.isOnlineOnly());
                 section.setMeetingInfo(info.getMeetingInfo());
                 CourseSection savedSection = courseSectionRepository.save(section);
-                existingSectionsBySectionId.put(savedSection.getSectionId(), savedSection);
+                existingSectionsByDocId.put(savedSection.getDocId(), savedSection);
 
-                if (subsBySectionId.containsKey(sectionId)
+                if (subsByDocId.containsKey(docId)
                         && hasRelevantSeatOrStatusChange(previousStatus, previousOpenSeats, previousWaitlistSeats, info)) {
                     relevantStateChanged = true;
                 }
@@ -198,7 +214,7 @@ public class SchedulerService {
                     fileRepository.save(info);
 
                     AlertAction action = determineAction(previousStatus, currentStatus);
-                    for (UserSectionSubscription sub : subsBySectionId.getOrDefault(sectionId, List.of())) {
+                    for (UserSectionSubscription sub : subsByDocId.getOrDefault(docId, List.of())) {
                         String recipientEmail = sub.getUser().getEmail();
                         if (recipientEmail == null || recipientEmail.isBlank()) {
                             log.warn("[Scheduler] Skipping sub {} because email is missing.", sub.getId());
@@ -209,7 +225,7 @@ public class SchedulerService {
                 }
             }
 
-            updateNextPoll(course, infos, subsBySectionId, relevantStateChanged, polledAt);
+            updateNextPoll(course, infos, subsByDocId, relevantStateChanged, polledAt);
         } catch (Exception e) {
             scheduleAfterFailure(course, polledAt);
             log.error("[Scheduler] Error processing course {}", courseId, e);
@@ -264,7 +280,10 @@ public class SchedulerService {
      */
     private Course upsertCourse(Course course, SectionInfo info) {
         Course targetCourse = course == null
-                ? courseRepository.findByCourseId(info.getCourseId()).orElseGet(() -> new Course(info.getCourseId()))
+                ? courseRepository.findByTermCodeAndCourseId(info.getTermCode(), info.getCourseId())
+                .orElseGet(() -> courseRepository.findByCourseId(info.getCourseId())
+                        .filter(existingCourse -> info.getTermCode().equals(existingCourse.getTermCode()))
+                        .orElseGet(() -> new Course(info.getTermCode(), info.getCourseId())))
                 : course;
         targetCourse.setTermCode(info.getTermCode());
         targetCourse.setSubjectCode(info.getSubjectCode());
@@ -279,9 +298,10 @@ public class SchedulerService {
      * @param courseId UW 6-digit course id
      * @return true when the course was newly enqueued
      */
-    private synchronized boolean enqueueCourseIfAbsent(String courseId, String subjectCode) {
-        QueuedCourse q = new QueuedCourse(courseId,subjectCode);
-        if (!queuedCourseIds.add(courseId)) {
+    private synchronized boolean enqueueCourseIfAbsent(UUID courseUuid, String courseId, String termCode, String subjectCode) {
+        String queueKey = termCode + ":" + courseId;
+        QueuedCourse q = new QueuedCourse(courseUuid, courseId, termCode, subjectCode);
+        if (!queuedCourseIds.add(queueKey)) {
             return false;
         }
         dueCourseQueue.offer(q);
@@ -296,7 +316,7 @@ public class SchedulerService {
     private synchronized QueuedCourse pollNextCourseId() {
         QueuedCourse q = dueCourseQueue.poll();
         if (q != null) {
-            queuedCourseIds.remove(q.courseId());
+            queuedCourseIds.remove(q.termCode() + ":" + q.courseId());
         }
         return q;
     }
@@ -345,19 +365,19 @@ public class SchedulerService {
      *
      * @param course canonical course row
      * @param infos latest section snapshots for the course
-     * @param subsBySectionId enabled subscriptions grouped by section id
+     * @param subsByDocId enabled subscriptions grouped by doc id
      * @param relevantStateChanged whether any enabled section materially changed this round
      * @param polledAt actual poll timestamp for this course
      */
     private void updateNextPoll(
             Course course,
             List<SectionInfo> infos,
-            Map<String, List<UserSectionSubscription>> subsBySectionId,
+            Map<String, List<UserSectionSubscription>> subsByDocId,
             boolean relevantStateChanged,
             LocalDateTime polledAt
     ) {
         int nextUnchangedPollCount = relevantStateChanged ? 0 : safeUnchangedCount(course) + 1;
-        int nextIntervalSeconds = determineNextIntervalSeconds(infos, subsBySectionId, nextUnchangedPollCount);
+        int nextIntervalSeconds = determineNextIntervalSeconds(infos, subsByDocId, nextUnchangedPollCount);
 
         course.setLastPolledAt(polledAt);
         course.setUnchangedPollCount(relevantStateChanged ? 0 : nextUnchangedPollCount);
@@ -386,17 +406,17 @@ public class SchedulerService {
      * and taking the minimum interval among them.
      *
      * @param infos latest section snapshots for one course
-     * @param subsBySectionId enabled subscriptions grouped by section id
+     * @param subsByDocId enabled subscriptions grouped by doc id
      * @param unchangedPollCount consecutive polls with no relevant change
      * @return next interval in seconds
      */
     private int determineNextIntervalSeconds(
             List<SectionInfo> infos,
-            Map<String, List<UserSectionSubscription>> subsBySectionId,
+            Map<String, List<UserSectionSubscription>> subsByDocId,
             int unchangedPollCount
     ) {
         return infos.stream()
-                .filter(info -> subsBySectionId.containsKey(info.getSectionId()))
+                .filter(info -> subsByDocId.containsKey(info.getDocId()))
                 .mapToInt(info -> calculateIntervalSeconds(info, unchangedPollCount))
                 .min()
                 .orElse(CLOSED_INTERVAL_SECONDS);
@@ -493,7 +513,9 @@ public class SchedulerService {
         dto.setActiveCourseCount(subscriptionRepository.countDistinctEnabledCourses());
         dto.setDueCourseCount(courseRepository.countDueForPolling(now));
         dto.setQueueSize(dueCourseQueue.size());
-        dto.setQueuedCourseIds(List.copyOf(dueCourseQueue.stream().map(QueuedCourse::courseId).toList()));
+        dto.setQueuedCourseIds(List.copyOf(dueCourseQueue.stream()
+                .map(q -> q.termCode() + ":" + q.courseId())
+                .toList()));
         dto.setLastHeartbeatAt(lastHeartbeatAt);
         dto.setLastFetchStartedAt(lastFetchStartedAt);
         dto.setLastFetchFinishedAt(lastFetchFinishedAt);
@@ -501,6 +523,6 @@ public class SchedulerService {
         return dto;
     }
 
-    public record QueuedCourse(String courseId, String subjectCode){}
+    public record QueuedCourse(UUID courseUuid, String courseId, String termCode, String subjectCode){}
 
 }

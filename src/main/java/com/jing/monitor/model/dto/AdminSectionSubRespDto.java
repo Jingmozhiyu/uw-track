@@ -12,6 +12,7 @@ import java.util.UUID;
 public class AdminSectionSubRespDto {
     private UUID subscriptionId;
     private boolean enabled;
+    private String docId;
     private String courseId;
     private String subjectCode;
     private String catalogNumber;
@@ -22,5 +23,6 @@ public class AdminSectionSubRespDto {
     private Integer capacity;
     private Integer waitlistSeats;
     private Integer waitlistCapacity;
+    private boolean onlineOnly;
     private String meetingInfo;
 }

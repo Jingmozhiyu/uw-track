@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -13,10 +14,15 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Canonical course record keyed by an internal UUID and a unique UW course id.
+ * Canonical course record keyed by an internal UUID and a unique term/course pair.
  */
 @Entity
-@Table(name = "courses")
+@Table(
+        name = "courses",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_course_term_course_id", columnNames = {"term_code", "course_id"})
+        }
+)
 @Data
 @NoArgsConstructor
 public class Course {
@@ -26,7 +32,7 @@ public class Course {
     @Column(name = "course_uuid", nullable = false, updatable = false)
     private UUID id;
 
-    @Column(name = "course_id", nullable = false, unique = true, length = 6)
+    @Column(name = "course_id", nullable = false, length = 32)
     private String courseId;
 
     @Column(name = "term_code", nullable = false)
@@ -50,7 +56,8 @@ public class Course {
     @Column(name = "unchanged_poll_count", nullable = false)
     private Integer unchangedPollCount = 0;
 
-    public Course(String courseId) {
+    public Course(String termCode, String courseId) {
+        this.termCode = termCode;
         this.courseId = courseId;
         this.unchangedPollCount = 0;
     }

@@ -11,6 +11,7 @@ import lombok.NoArgsConstructor;
 public class SectionInfo {
     private String termCode;
     private String courseId;
+    private String docId;
     private String sectionId;
     private String subjectCode;
     private String subjectShortName;
@@ -20,11 +21,13 @@ public class SectionInfo {
     private Integer capacity;
     private Integer waitlistSeats;
     private Integer waitlistCapacity;
+    private boolean onlineOnly;
     private String meetingInfo;
 
     public SectionInfo(
             String termCode,
             String courseId,
+            String docId,
             String sectionId,
             String subjectCode,
             String subjectShortName,
@@ -34,10 +37,12 @@ public class SectionInfo {
             Integer capacity,
             Integer waitlistSeats,
             Integer waitlistCapacity,
+            boolean onlineOnly,
             String meetingInfo
     ) {
         this.termCode = termCode;
         this.courseId = courseId;
+        this.docId = docId;
         this.sectionId = sectionId;
         this.subjectCode = subjectCode;
         this.subjectShortName = subjectShortName;
@@ -47,6 +52,7 @@ public class SectionInfo {
         this.capacity = capacity;
         this.waitlistSeats = waitlistSeats;
         this.waitlistCapacity = waitlistCapacity;
+        this.onlineOnly = onlineOnly;
         this.meetingInfo = meetingInfo;
     }
 

@@ -183,6 +183,7 @@ public class AdminService {
         AdminSectionSubRespDto dto = new AdminSectionSubRespDto();
         dto.setSubscriptionId(sub.getId());
         dto.setEnabled(sub.isEnabled());
+        dto.setDocId(section.getDocId());
         dto.setCourseId(course.getCourseId());
         dto.setSubjectCode(course.getSubjectCode());
         dto.setCatalogNumber(course.getCatalogNumber());
@@ -193,6 +194,7 @@ public class AdminService {
         dto.setCapacity(section.getCapacity());
         dto.setWaitlistSeats(section.getWaitlistSeats());
         dto.setWaitlistCapacity(section.getWaitlistCapacity());
+        dto.setOnlineOnly(section.isOnlineOnly());
         dto.setMeetingInfo(section.getMeetingInfo());
         return dto;
     }

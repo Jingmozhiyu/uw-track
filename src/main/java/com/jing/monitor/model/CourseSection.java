@@ -18,7 +18,7 @@ import lombok.NoArgsConstructor;
 import java.util.UUID;
 
 /**
- * Section snapshot keyed by an internal UUID and a unique validated section id.
+ * Section snapshot keyed by an internal UUID and a unique UW doc id.
  */
 @Entity
 @Table(name = "course_sections")
@@ -31,7 +31,10 @@ public class CourseSection {
     @Column(name = "section_uuid", nullable = false, updatable = false)
     private UUID id;
 
-    @Column(name = "section_id", nullable = false, unique = true)
+    @Column(name = "doc_id", unique = true)
+    private String docId;
+
+    @Column(name = "section_id", nullable = false)
     private String sectionId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -53,6 +56,9 @@ public class CourseSection {
 
     @Column(name = "waitlist_capacity")
     private Integer waitlistCapacity;
+
+    @Column(name = "online_only", nullable = false)
+    private boolean onlineOnly;
 
     @Lob
     @Column(name = "meeting_info", columnDefinition = "TEXT")

@@ -37,14 +37,14 @@ class TaskRepositoryTest {
     void testCrudOperations() {
         String uniqueSuffix = String.valueOf(System.currentTimeMillis());
 
-        Course course = new Course("9" + uniqueSuffix.substring(uniqueSuffix.length() - 5));
-        course.setTermCode("9999");
+        Course course = new Course("9999", "9" + uniqueSuffix.substring(uniqueSuffix.length() - 5));
         course.setSubjectCode("266");
         course.setSubjectShortName("COMP SCI");
         course.setCatalogNumber("999");
         courseRepository.save(course);
 
         CourseSection section = new CourseSection();
+        section.setDocId("doc-" + uniqueSuffix);
         section.setSectionId("8" + uniqueSuffix.substring(uniqueSuffix.length() - 4));
         section.setCourse(course);
         section.setMeetingInfo("[]");

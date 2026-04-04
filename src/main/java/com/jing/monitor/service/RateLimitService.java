@@ -260,9 +260,13 @@ public class RateLimitService {
     private Map<String, RateLimitRule> buildRules() {
         Map<String, RateLimitRule> rules = new LinkedHashMap<>();
         rules.put(buildEndpointKey("POST", "/auth/login"), ipRule("login", 10, 10 * 60_000L, 30, 24 * 60 * 60_000L));
-        rules.put(buildEndpointKey("POST", "/auth/register"), ipRule("register", 5, 10 * 60_000L, 20, 24 * 60 * 60_000L));
-        rules.put(buildEndpointKey("GET", "/api/tasks"), userRule("tasks_list", 10, 60_000L, 100, 24 * 60 * 60_000L));
-        rules.put(buildEndpointKey("GET", "/api/tasks/search"), userRule("search", 5, 60_000L, 60, 24 * 60 * 60_000L));
+        rules.put(buildEndpointKey("POST", "/auth/register"), ipRule("register", 5, 10 * 60_000L, 10, 24 * 60 * 60_000L));
+        rules.put(buildEndpointKey("POST", "/api/feedback"), ipRule("feedback", 2, 60_000L, 5, 24 * 60 * 60_000L));
+        rules.put(buildEndpointKey("GET", "/api/tasks"), userRule("tasks_list", 20, 60_000L, 200, 24 * 60 * 60_000L));
+        // Both search endpoints share the same Redis bucket name so one user cannot bypass
+        // the intended quota by alternating between "search courses" and "search sections".
+        rules.put(buildEndpointKey("GET", "/api/tasks/search/courses"), userRule("search", 10, 60_000L, 80, 24 * 60 * 60_000L));
+        rules.put(buildEndpointKey("GET", "/api/tasks/search/sections"), userRule("search", 10, 60_000L, 80, 24 * 60 * 60_000L));
         rules.put(buildEndpointKey("POST", "/api/tasks"), userRule("add", 5, 60_000L, 30, 24 * 60 * 60_000L));
         rules.put(buildEndpointKey("DELETE", "/api/tasks"), userRule("delete", 5, 60_000L, 30, 24 * 60 * 60_000L));
         return rules;

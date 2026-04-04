@@ -29,9 +29,6 @@ import java.util.List;
 @Slf4j
 public class CourseCrawler {
 
-    @Value("${uw-api.term-id}")
-    private String termId;
-
     @Value("${uw-api.user-agent}")
     private String userAgent;
 
@@ -40,10 +37,10 @@ public class CourseCrawler {
     /**
      * Fetches the real-time status of ALL sections for a specific course ID.
      *
-     * @param courseId The 6-digit course identifier (e.g. 004289).
+     * @param courseId The canonical course identifier accepted by the enrollment-package endpoint.
      * @return List of SectionInfo objects, or null if fetch fails.
      */
-    public List<SectionInfo> fetchCourseStatus(String subjectCode, String courseId) {
+    public List<SectionInfo> fetchCourseStatus(String termId, String subjectCode, String courseId) {
         // Construct the GET endpoint for course-level details
         String url = String.format("https://public.enroll.wisc.edu/api/search/v1/enrollmentPackages/%s/%s/%s",
                 termId, subjectCode, courseId);
@@ -115,8 +112,9 @@ public class CourseCrawler {
     }
 
     private SectionInfo parseSectionInfo(JsonNode node, String fallbackCourseId) {
+        String docId = node.path("docId").asText();
         String sectionId = node.path("enrollmentClassNumber").asText();
-        if (sectionId == null || sectionId.isBlank()) {
+        if (docId == null || docId.isBlank() || sectionId == null || sectionId.isBlank()) {
             return null;
         }
 
@@ -133,8 +131,9 @@ public class CourseCrawler {
         Integer waitlistCapacity = nullableInt(enrollmentStatusNode, "waitlistCapacity");
 
         return new SectionInfo(
-                node.path("termCode").asText(termId),
+                node.path("termCode").asText(),
                 node.path("courseId").asText(fallbackCourseId),
+                docId,
                 sectionId,
                 node.path("subjectCode").asText(subjectNode.path("subjectCode").asText()),
                 subjectNode.path("shortDescription").asText(),
@@ -144,6 +143,7 @@ public class CourseCrawler {
                 capacity,
                 waitlistSeats,
                 waitlistCapacity,
+                node.path("onlineOnly").asBoolean(false),
                 buildMeetingInfo(node.path("classMeetings"))
         );
     }
@@ -196,6 +196,17 @@ public class CourseCrawler {
                 } else {
                     payload.putNull("meetingTimeEnd");
                 }
+                JsonNode buildingNode = meetingNode.path("building");
+                if (!buildingNode.isMissingNode() && !buildingNode.path("buildingName").isMissingNode() && !buildingNode.path("buildingName").isNull()) {
+                    payload.put("buildingName", buildingNode.path("buildingName").asText());
+                } else {
+                    payload.putNull("buildingName");
+                }
+                if (!meetingNode.path("room").isMissingNode() && !meetingNode.path("room").isNull()) {
+                    payload.put("room", meetingNode.path("room").asText());
+                } else {
+                    payload.putNull("room");
+                }
                 result.add(payload);
             }
         }
@@ -208,14 +219,14 @@ public class CourseCrawler {
      * @param userQueryString user input query such as "COMP SCI 577"
      * @return parsed search response JSON, or {@code null} when request fails
      */
-    public JsonNode searchCourse(String userQueryString) {
+    public JsonNode searchCourse(String userQueryString, String termId, int page) {
         String searchUrl = "https://public.enroll.wisc.edu/api/search/v1";
 
         try {
             ObjectNode root = mapper.createObjectNode();
             root.put("selectedTerm", termId);
             root.put("queryString", userQueryString); // "COMP SCI 571"
-            root.put("page", 1);
+            root.put("page", page);
             root.put("pageSize", 50);
             root.put("sortOrder", "SCORE");
 

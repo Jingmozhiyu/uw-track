@@ -55,7 +55,7 @@ public class MailService {
 
             // Optimized Body
             message.setText(
-                    "Great news!\n\n" +
+                    "Hello Badger!\n\n" +
                             "A seat has just opened up for your monitored course.\n\n" +
                             "📚 Course: " + courseInfo + "\n" +
                             "🔖 Section: " + section + "\n" +
@@ -99,7 +99,7 @@ public class MailService {
 
             // Optimized Body
             message.setText(
-                    "Hello,\n\n" +
+                    "Hello Badger!,\n\n" +
                             "A waitlist spot has just opened up for your monitored course.\n\n" +
                             "📚 Course: " + courseInfo + "\n" +
                             "🔖 Section: " + section + "\n" +
@@ -152,10 +152,50 @@ public class MailService {
         }
     }
 
+    /**
+     * Sends one forwarded feedback email to the project maintainer.
+     *
+     * @param recipientEmail fixed feedback recipient mailbox
+     * @param senderEmail authenticated user email
+     * @param feedbackText raw feedback text
+     */
+    public void sendFeedbackEmail(String recipientEmail, String senderEmail, String feedbackText) {
+        log.info("[Mail] Preparing to send feedback email from {} to {}", senderEmail, recipientEmail);
+
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromEmail);
+            message.setTo(requireRecipientEmail(recipientEmail));
+            message.setSubject("MadEnroll User Feedback");
+            message.setText(
+                    "A user submitted feedback from the frontend.\n\n" +
+                            "Sender:\n" +
+                            requireRecipientEmail(senderEmail) + "\n\n" +
+                            "Feedback:\n" +
+                            requireFeedbackText(feedbackText) + "\n\n" +
+                            "---\n" +
+                            "Forwarded by MadEnroll"
+            );
+
+            mailSender.send(message);
+            log.info("[Mail] Feedback email forwarded successfully from {}", senderEmail);
+        } catch (Exception e) {
+            log.error("[Mail] Failed to forward feedback email from {}", senderEmail, e);
+            throw new IllegalStateException("Failed to send feedback email.", e);
+        }
+    }
+
     private String requireRecipientEmail(String recipientEmail) {
         if (recipientEmail == null || recipientEmail.isBlank()) {
             throw new IllegalArgumentException("Recipient email is required.");
         }
         return Objects.requireNonNull(recipientEmail).trim().toLowerCase();
+    }
+
+    private String requireFeedbackText(String feedbackText) {
+        if (feedbackText == null || feedbackText.isBlank()) {
+            throw new IllegalArgumentException("Feedback text is required.");
+        }
+        return feedbackText.trim();
     }
 }

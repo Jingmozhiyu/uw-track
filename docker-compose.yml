@@ -65,7 +65,6 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      TERM_ID: 1272
     volumes:
       - ./app.jar:/app.jar:ro
     command: ["java", "-jar", "/app.jar"]

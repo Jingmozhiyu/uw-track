@@ -11,6 +11,7 @@ import java.util.UUID;
 @Data
 public class TaskRespDto {
     private UUID id;
+    private String docId;
     private String sectionId;
     private String courseId;
     private String subjectCode;
@@ -20,6 +21,7 @@ public class TaskRespDto {
     private Integer capacity;
     private Integer waitlistSeats;
     private Integer waitlistCapacity;
+    private boolean onlineOnly;
     private String meetingInfo;
     private StatusMapping status;
     private boolean enabled;

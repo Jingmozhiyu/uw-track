@@ -17,8 +17,10 @@ public class AlertEvent {
     private UUID eventId;
     private AlertType alertType;
     private String recipientEmail;
+    private String senderEmail;
     private String sectionId;
     private String courseDisplayName;
+    private String messageBody;
     private boolean manualTest;
     private LocalDateTime createdAt;
 }

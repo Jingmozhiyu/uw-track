@@ -24,25 +24,25 @@ public interface UserSectionSubscriptionRepository extends JpaRepository<UserSec
     Optional<UserSectionSubscription> findByIdAndUser_Id(UUID id, UUID userId);
 
     @EntityGraph(attributePaths = {"user", "section", "section.course"})
-    List<UserSectionSubscription> findAllBySection_SectionIdInAndUser_Id(Collection<String> sectionIds, UUID userId);
+    List<UserSectionSubscription> findAllBySection_DocIdInAndUser_Id(Collection<String> docIds, UUID userId);
 
     @EntityGraph(attributePaths = {"user", "section", "section.course"})
     List<UserSectionSubscription> findAllByEnabledTrue();
 
     @EntityGraph(attributePaths = {"user", "section", "section.course"})
-    List<UserSectionSubscription> findAllByEnabledTrueAndSection_Course_CourseId(String courseId);
+    List<UserSectionSubscription> findAllByEnabledTrueAndSection_Course_Id(UUID courseId);
 
-    boolean existsByEnabledTrueAndSection_Course_CourseId(String courseId);
+    boolean existsByEnabledTrueAndSection_Course_Id(UUID courseId);
 
     @Query("""
-            select count(distinct sub.section.course.courseId)
+            select count(distinct sub.section.course.id)
             from UserSectionSubscription sub
             where sub.enabled = true
             """)
     long countDistinctEnabledCourses();
 
     @EntityGraph(attributePaths = {"user", "section", "section.course"})
-    Optional<UserSectionSubscription> findByUser_IdAndSection_SectionId(UUID userId, String sectionId);
+    Optional<UserSectionSubscription> findByUser_IdAndSection_DocId(UUID userId, String docId);
 
     long countByUser_IdAndEnabledTrue(UUID userId);
 }

@@ -48,6 +48,8 @@ public class AlertConsumerService {
                 mailService.sendCourseWaitlistedAlert(event.getRecipientEmail(), event.getSectionId(), event.getCourseDisplayName());
             } else if (event.getAlertType() == AlertType.WELCOME) {
                 mailService.sendWelcomeEmail(event.getRecipientEmail());
+            } else if (event.getAlertType() == AlertType.FEEDBACK) {
+                mailService.sendFeedbackEmail(event.getRecipientEmail(), event.getSenderEmail(), event.getMessageBody());
             } else {
                 throw new IllegalArgumentException("Unsupported alert type: " + event.getAlertType());
             }

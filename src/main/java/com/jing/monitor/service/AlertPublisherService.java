@@ -61,6 +61,7 @@ public class AlertPublisherService {
         event.setRecipientEmail(recipientEmail);
         event.setSectionId(sectionId);
         event.setCourseDisplayName(courseDisplayName);
+        event.setMessageBody(null);
         event.setManualTest(manualTest);
         event.setCreatedAt(LocalDateTime.now());
 
@@ -75,5 +76,27 @@ public class AlertPublisherService {
      */
     public void publishWelcomeEmail(String recipientEmail) {
         publishAlert(AlertType.WELCOME, recipientEmail, "WELCOME", "Welcome to MadEnroll", false);
+    }
+
+    /**
+     * Publishes one feedback email event for asynchronous processing.
+     *
+     * @param senderEmail authenticated user email
+     * @param feedbackText raw feedback text
+     */
+    public void publishFeedbackEmail(String senderEmail, String feedbackText) {
+        AlertEvent event = new AlertEvent();
+        event.setEventId(UUID.randomUUID());
+        event.setAlertType(AlertType.FEEDBACK);
+        event.setRecipientEmail("ygong68@wisc.edu");
+        event.setSenderEmail(senderEmail);
+        event.setSectionId("FEEDBACK");
+        event.setCourseDisplayName("User Feedback");
+        event.setMessageBody(feedbackText);
+        event.setManualTest(false);
+        event.setCreatedAt(LocalDateTime.now());
+
+        rabbitTemplate.convertAndSend(alertExchangeName, alertRoutingKey, event);
+        log.info("[AlertPublisher] Published FEEDBACK event {} from {}", event.getEventId(), senderEmail);
     }
 }
