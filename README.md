@@ -4,7 +4,7 @@ UW Track is a course seat monitoring system for the University of Wisconsin-Madi
 It lets users search courses, subscribe to specific sections, and receive email alerts when a section becomes `WAITLISTED` or `OPEN`.
 
 Frontend:
-- [mad-enroll.vercel.app](https://mad-enroll.vercel.app)
+- [madenroll.com](https://madenroll.com)
 
 Frontend repository:
 - [Jingmozhiyu/mad-enroll](https://github.com/Jingmozhiyu/mad-enroll)
