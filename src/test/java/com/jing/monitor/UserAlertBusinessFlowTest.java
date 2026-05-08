@@ -67,7 +67,21 @@ import static org.mockito.Mockito.when;
         "spring.datasource.password=",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.H2Dialect",
-        "spring.jpa.show-sql=false"
+        "spring.jpa.show-sql=false",
+        "FETCH_INTERVAL=60000",
+        "JWT_SECRET=01234567890123456789012345678901",
+        "ADMIN_EMAIL=admin@example.com",
+        "ADMIN_PASSWORD=admin-secret",
+        "DB_USERNAME=sa",
+        "DB_PASSWORD=test-db-password",
+        "MAIL_ADDRESS=noreply@example.com",
+        "MAIL_AUTH_CODE=test-mail-code",
+        "RABBITMQ_HOST=localhost",
+        "RABBITMQ_PORT=5672",
+        "RABBITMQ_USERNAME=guest",
+        "RABBITMQ_PASSWORD=guest",
+        "REDIS_HOST=localhost",
+        "REDIS_PORT=6379"
 })
 @Transactional
 @SuppressWarnings("unchecked")
